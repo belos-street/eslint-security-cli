@@ -1,0 +1,74 @@
+{
+  "name": "eslint-security-cli",
+  "version": "1.0.0",
+  "description": "基于ESLint的静态分析安全工具",
+  "type": "module",
+  "module": "dist/index.js",
+  "bin": {
+    "eslint-security": "dist/cli/index.js"
+  },
+  "scripts": {
+    "dev": "bun run src/cli/index.ts",
+    "build": "bun build src/cli/index.ts --outdir dist --target bun",
+    "build:binary": "bun build src/cli/index.ts --outfile bin/eslint-security --target bun --compile",
+    "build:all": "bun run build && bun run build:binary",
+    "test": "bun test",
+    "lint": "eslint src/**/*.ts",
+    "lint:fix": "eslint src/**/*.ts --fix",
+    "clean": "rm -rf dist bin",
+    "prepublishOnly": "bun run build:all"
+  },
+  "keywords": [
+    "eslint",
+    "security",
+    "static-analysis",
+    "cli",
+    "typescript",
+    "bun",
+    "xss",
+    "redos",
+    "vue",
+    "react"
+  ],
+  "author": "Your Name",
+  "license": "MIT",
+  "engines": {
+    "bun": ">=1.0.0"
+  },
+  "dependencies": {
+    "@babel/eslint-parser": "^7.26.5",
+    "@typescript-eslint/eslint-plugin": "^8.22.0",
+    "@typescript-eslint/parser": "^8.22.0",
+    "chalk": "^5.4.1",
+    "commander": "^13.1.0",
+    "eslint": "^9.19.0",
+    "eslint-plugin-sonarjs": "^3.0.5",
+    "figlet": "^1.9.4",
+    "glob": "^11.0.1",
+    "vue-eslint-parser": "^10.2.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.13.1",
+    "typescript": "^5.7.3",
+    "eslint-config-prettier": "^10.0.1",
+    "prettier": "^3.4.2"
+  },
+  "peerDependencies": {
+    "eslint": "^9.0.0"
+  },
+  "files": [
+    "dist",
+    "bin",
+    "configs",
+    "README.md",
+    "LICENSE"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/your-username/eslint-security-cli.git"
+  },
+  "bugs": {
+    "url": "https://github.com/your-username/eslint-security-cli/issues"
+  },
+  "homepage": "https://github.com/your-username/eslint-security-cli#readme"
+}
