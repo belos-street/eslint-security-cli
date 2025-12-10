@@ -10,5 +10,5 @@ export { lintProject } from './project-lint'
 // 结果输出
 export { outputResults } from './results-output'
 
-// 扫描任务
-export { scanTask } from './scan-task'
+// 创建扫描任务
+export { createScanTask } from './scan-task'

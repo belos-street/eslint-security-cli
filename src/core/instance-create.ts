@@ -5,7 +5,7 @@ import { ESLint, type Linter } from 'eslint'
  * @param overrideConfig 覆盖配置
  * @returns ESLint实例
  */
-export const createInstance = (overrideConfig: Linter.Config): ESLint => {
+export const createInstance = (overrideConfig: Linter.Config[]): ESLint => {
   return new ESLint({
     overrideConfig,
     overrideConfigFile: true

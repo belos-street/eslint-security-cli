@@ -5,12 +5,12 @@
   "type": "module",
   "module": "dist/index.js",
   "bin": {
-    "eslint-security": "dist/cli/index.js"
+    "eslint-security": "dist/main.js"
   },
   "scripts": {
-    "dev": "bun run src/cli/index.ts",
-    "build": "bun build src/cli/index.ts --outdir dist --target bun",
-    "build:binary": "bun build src/cli/index.ts --outfile bin/eslint-security --target bun --compile",
+    "dev": "bun run src/main.ts",
+    "build": "bun build src/main.ts --outdir dist --target bun",
+    "build:binary": "bun build src/main.ts --outfile bin/eslint-security --target bun --compile",
     "build:all": "bun run build && bun run build:binary",
     "test": "bun test",
     "lint": "eslint src/**/*.ts",
@@ -37,11 +37,12 @@
   },
   "dependencies": {
     "@babel/eslint-parser": "^7.26.5",
-    "@typescript-eslint/eslint-plugin": "^8.22.0",
-    "@typescript-eslint/parser": "^8.22.0",
+    "@typescript-eslint/eslint-plugin": "^8.49.0",
+    "@typescript-eslint/parser": "^8.49.0",
     "chalk": "^5.4.1",
     "commander": "^13.1.0",
     "eslint": "^9.19.0",
+    "eslint-plugin-security": "^3.0.1",
     "eslint-plugin-sonarjs": "^3.0.5",
     "figlet": "^1.9.4",
     "glob": "^11.0.1",

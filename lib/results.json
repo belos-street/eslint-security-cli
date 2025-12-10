@@ -1,0 +1,596 @@
+[
+  {
+    "filePath": "/Volumes/jiangzhi-ssd/code/personal/eslint-security-cli/test-case/js-security/path-traversal.js",
+    "messages": [
+      {
+        "ruleId": "sonarjs/x-powered-by",
+        "severity": 2,
+        "message": "This framework implicitly discloses version information by default. Make sure it is safe here.",
+        "line": 17,
+        "column": 7,
+        "nodeType": "Identifier",
+        "messageId": "headerDefault",
+        "endLine": 17,
+        "endColumn": 10
+      },
+      {
+        "ruleId": "sonarjs/no-nested-template-literals",
+        "severity": 2,
+        "message": "Refactor this code to not use nested template literals.",
+        "line": 331,
+        "column": 84,
+        "nodeType": "TemplateLiteral",
+        "messageId": "nestedTemplateLiterals",
+        "endLine": 331,
+        "endColumn": 92
+      },
+      {
+        "ruleId": "sonarjs/os-command",
+        "severity": 2,
+        "message": "Make sure that executing this OS command is safe here.",
+        "line": 333,
+        "column": 5,
+        "nodeType": "Identifier",
+        "messageId": "safeOSCommand",
+        "endLine": 333,
+        "endColumn": 9
+      },
+      {
+        "ruleId": "sonarjs/no-ignored-exceptions",
+        "severity": 2,
+        "message": "Handle this exception or don't catch it at all.",
+        "line": 383,
+        "column": 15,
+        "nodeType": "CatchClause",
+        "messageId": "handleException",
+        "endLine": 385,
+        "endColumn": 14
+      }
+    ],
+    "suppressedMessages": [],
+    "errorCount": 4,
+    "fatalErrorCount": 0,
+    "warningCount": 0,
+    "fixableErrorCount": 0,
+    "fixableWarningCount": 0,
+    "source": "/**\n * 路径遍历漏洞示例\n * 相关规则：\n * - CWE-22: Path Traversal\n * - CWE-23: Relative Path Traversal\n * - CWE-36: Absolute Path Traversal\n * - CWE-73: External Control of File Name or Path\n * - OWASP Top 10:2017-A5-Broken Access Control\n * - OWASP Top 10:2021-A01-Broken Access Control\n * - PCI DSS V3.2.1-Requirement 6.5.3\n * - CWE Top 25:2023-CWE-22\n */\n\nconst express = require('express');\nconst fs = require('fs');\nconst path = require('path');\nconst app = express();\n\napp.use(express.json());\napp.use(express.urlencoded({ extended: true }));\n\n// 基础路径遍历漏洞 - 文件读取\napp.get('/read-file', (req, res) => {\n    const filename = req.query.filename;\n\n    if (!filename) {\n        res.status(400).send('缺少文件名参数');\n        return;\n    }\n\n    // 危险：直接使用用户输入的文件名，未进行路径验证\n    const filePath = './uploads/' + filename;\n\n    console.log(`尝试读取文件: ${filePath}`);\n\n    fs.readFile(filePath, 'utf8', (err, data) => {\n        if (err) {\n            res.status(500).json({\n                error: err.message,\n                attemptedPath: filePath\n            });\n            return;\n        }\n\n        res.json({\n            content: data,\n            filename: filename,\n            path: filePath\n        });\n    });\n});\n\n// 路径遍历漏洞 - 文件下载\napp.get('/download', (req, res) => {\n    const file = req.query.file;\n\n    if (!file) {\n        res.status(400).send('缺少文件参数');\n        return;\n    }\n\n    // 危险：使用path.join但没有验证最终路径\n    const filePath = path.join('./documents/', file);\n\n    console.log(`下载文件路径: ${filePath}`);\n\n    // 检查文件是否存在\n    if (fs.existsSync(filePath)) {\n        // 泄露文件真实路径\n        res.setHeader('Content-Disposition', `attachment; filename=\"${path.basename(filePath)}\"`);\n        res.setHeader('X-File-Path', filePath); // 泄露服务器路径信息\n\n        const fileStream = fs.createReadStream(filePath);\n        fileStream.pipe(res);\n    } else {\n        res.status(404).json({\n            error: '文件不存在',\n            searchedPath: filePath,\n            availableFiles: fs.readdirSync('./documents/')\n        });\n    }\n});\n\n// 路径遍历 - 文件删除功能\napp.delete('/delete', (req, res) => {\n    const filepath = req.body.filepath;\n    const userId = req.body.userId;\n\n    if (!filepath) {\n        res.status(400).send('缺少文件路径');\n        return;\n    }\n\n    // 危险：用户可以直接指定要删除的文件路径\n    const fullPath = path.resolve('./user_files/' + userId, filepath);\n\n    console.log(`删除文件: ${fullPath}`);\n\n    fs.unlink(fullPath, (err) => {\n        if (err) {\n            res.status(500).json({\n                error: err.message,\n                path: fullPath,\n                code: err.code\n            });\n            return;\n        }\n\n        res.json({\n            success: true,\n            deletedFile: fullPath\n        });\n    });\n});\n\n// 路径遍历 - 文件上传\napp.post('/upload', (req, res) => {\n    const filename = req.body.filename;\n    const content = req.body.content;\n    const uploadDir = req.body.uploadDir || 'uploads';\n\n    if (!filename || !content) {\n        res.status(400).send('缺少文件名或内容');\n        return;\n    }\n\n    // 危险：用户可以控制上传目录和文件名\n    const uploadPath = path.join('./', uploadDir, filename);\n\n    console.log(`上传文件到: ${uploadPath}`);\n\n    // 确保目录存在\n    const dir = path.dirname(uploadPath);\n    if (!fs.existsSync(dir)) {\n        fs.mkdirSync(dir, { recursive: true });\n    }\n\n    fs.writeFile(uploadPath, content, (err) => {\n        if (err) {\n            res.status(500).json({\n                error: err.message,\n                path: uploadPath\n            });\n            return;\n        }\n\n        res.json({\n            success: true,\n            filename: filename,\n            path: uploadPath,\n            size: content.length\n        });\n    });\n});\n\n// 路径遍历 - 文件重命名\napp.put('/rename', (req, res) => {\n    const oldPath = req.body.oldPath;\n    const newPath = req.body.newPath;\n    const baseDir = req.body.baseDir || './files';\n\n    if (!oldPath || !newPath) {\n        res.status(400).send('缺少路径参数');\n        return;\n    }\n\n    // 危险：用户可以控制相对路径\n    const oldFullPath = path.join(baseDir, oldPath);\n    const newFullPath = path.join(baseDir, newPath);\n\n    console.log(`重命名: ${oldFullPath} -> ${newFullPath}`);\n\n    fs.rename(oldFullPath, newFullPath, (err) => {\n        if (err) {\n            res.status(500).json({\n                error: err.message,\n                oldPath: oldFullPath,\n                newPath: newFullPath\n            });\n            return;\n        }\n\n        res.json({\n            success: true,\n            oldPath: oldFullPath,\n            newPath: newFullPath\n        });\n    });\n});\n\n// 路径遍历 - 文件列表\napp.get('/list-files', (req, res) => {\n    const directory = req.query.dir;\n    const recursive = req.query.recursive === 'true';\n    const pattern = req.query.pattern || '*';\n\n    if (!directory) {\n        res.status(400).send('缺少目录参数');\n        return;\n    }\n\n    // 危险：用户可以访问任何目录\n    const targetDir = path.join('./public/', directory);\n\n    console.log(`列出目录: ${targetDir}`);\n\n    function listFiles(dir, isRecursive) {\n        let results = [];\n        const items = fs.readdirSync(dir);\n\n        items.forEach(item => {\n            const fullPath = path.join(dir, item);\n            const stat = fs.statSync(fullPath);\n\n            if (stat.isDirectory() && isRecursive) {\n                results = results.concat(listFiles(fullPath, true));\n            } else {\n                // 泄露完整路径信息\n                results.push({\n                    name: item,\n                    path: fullPath,\n                    size: stat.size,\n                    modified: stat.mtime,\n                    permissions: stat.mode\n                });\n            }\n        });\n\n        return results;\n    }\n\n    try {\n        const files = listFiles(targetDir, recursive);\n\n        res.json({\n            directory: targetDir,\n            files: files,\n            totalFiles: files.length,\n            pattern: pattern\n        });\n    } catch (err) {\n        res.status(500).json({\n            error: err.message,\n            directory: targetDir\n        });\n    }\n});\n\n// 路径遍历 - 文件内容预览\napp.get('/preview', (req, res) => {\n    const file = req.query.file;\n    const maxLines = parseInt(req.query.lines) || 50;\n    const encoding = req.query.encoding || 'utf8';\n\n    if (!file) {\n        res.status(400).send('缺少文件参数');\n        return;\n    }\n\n    // 危险：用户可以访问任意文件\n    const filePath = path.resolve('./files/', file);\n\n    console.log(`预览文件: ${filePath}`);\n\n    // 检查文件类型\n    const ext = path.extname(filePath).toLowerCase();\n    const allowedExtensions = ['.txt', '.md', '.json', '.xml', '.csv', '.log'];\n\n    if (!allowedExtensions.includes(ext)) {\n        res.status(400).json({\n            error: '不允许的文件类型',\n            extension: ext,\n            allowedTypes: allowedExtensions\n        });\n        return;\n    }\n\n    const readStream = fs.createReadStream(filePath, {\n        encoding: encoding,\n        highWaterMark: 1024 * maxLines\n    });\n\n    let content = '';\n    let lineCount = 0;\n\n    readStream.on('data', (chunk) => {\n        const lines = chunk.split('\\n');\n        for (let line of lines) {\n            if (lineCount >= maxLines) break;\n            content += line + '\\n';\n            lineCount++;\n        }\n    });\n\n    readStream.on('end', () => {\n        res.json({\n            content: content,\n            file: filePath,\n            linesShown: lineCount,\n            encoding: encoding\n        });\n    });\n\n    readStream.on('error', (err) => {\n        res.status(500).json({\n            error: err.message,\n            file: filePath\n        });\n    });\n});\n\n// 路径遍历 - 文件压缩\napp.get('/compress', (req, res) => {\n    const files = req.query.files ? req.query.files.split(',') : [];\n    const outputFile = req.query.output || 'archive.zip';\n    const compressionLevel = req.query.level || '6';\n\n    if (files.length === 0) {\n        res.status(400).send('缺少文件列表');\n        return;\n    }\n\n    // 危险：用户可以指定任意文件进行压缩\n    const filePaths = files.map(file => path.join('./documents/', file.trim()));\n    const outputPath = path.join('./archives/', outputFile);\n\n    console.log(`压缩文件: ${filePaths.join(', ')} -> ${outputPath}`);\n\n    // 使用系统命令进行压缩\n    const { exec } = require('child_process');\n    const command = `zip -${compressionLevel} \"${outputPath}\" ${filePaths.map(p => `\"${p}\"`).join(' ')}`;\n\n    exec(command, (error, stdout, stderr) => {\n        if (error) {\n            res.status(500).json({\n                error: error.message,\n                command: command,\n                stderr: stderr\n            });\n            return;\n        }\n\n        // 提供下载\n        res.download(outputPath, outputFile, (err) => {\n            if (err) {\n                console.error('下载错误:', err);\n            }\n            // 清理临时文件\n            fs.unlink(outputPath, () => { });\n        });\n    });\n});\n\n// 路径遍历 - 配置文件读取\napp.get('/config', (req, res) => {\n    const configName = req.query.name;\n    const format = req.query.format || 'json';\n\n    if (!configName) {\n        res.status(400).send('缺少配置名称');\n        return;\n    }\n\n    // 危险：用户可以读取任意配置文件\n    const configPath = path.join('./config/', configName + '.conf');\n\n    console.log(`读取配置: ${configPath}`);\n\n    fs.readFile(configPath, 'utf8', (err, data) => {\n        if (err) {\n            res.status(500).json({\n                error: err.message,\n                configPath: configPath,\n                availableConfigs: fs.readdirSync('./config/')\n            });\n            return;\n        }\n\n        let response;\n        if (format === 'json') {\n            try {\n                response = JSON.parse(data);\n            } catch (e) {\n                response = { raw: data };\n            }\n        } else {\n            response = { content: data };\n        }\n\n        // 泄露配置文件的完整路径\n        res.json({\n            config: response,\n            path: configPath,\n            lastModified: fs.statSync(configPath).mtime\n        });\n    });\n});\n\n// 路径遍历 - 日志文件查看\napp.get('/logs', (req, res) => {\n    const logFile = req.query.file;\n    const level = req.query.level || 'info';\n    const date = req.query.date;\n\n    if (!logFile && !date) {\n        res.status(400).send('缺少日志文件或日期参数');\n        return;\n    }\n\n    let logPath;\n    if (logFile) {\n        // 危险：用户可以指定任意日志文件\n        logPath = path.join('./logs/', logFile);\n    } else {\n        // 根据日期构建日志文件名\n        logPath = path.join('./logs/', `${level}-${date}.log`);\n    }\n\n    console.log(`查看日志: ${logPath}`);\n\n    // 检查文件大小\n    const stats = fs.statSync(logPath);\n    if (stats.size > 10 * 1024 * 1024) { // 10MB限制\n        res.status(400).json({\n            error: '日志文件过大',\n            size: stats.size,\n            maxSize: 10 * 1024 * 1024\n        });\n        return;\n    }\n\n    fs.readFile(logPath, 'utf8', (err, data) => {\n        if (err) {\n            res.status(500).json({\n                error: err.message,\n                logPath: logPath\n            });\n            return;\n        }\n\n        // 泄露日志文件路径和内容\n        res.json({\n            logs: data.split('\\n'),\n            logPath: logPath,\n            size: stats.size,\n            lastModified: stats.mtime\n        });\n    });\n});\n\napp.listen(3000, () => {\n    console.log('路径遍历漏洞演示服务器运行在端口3000');\n});",
+    "usedDeprecatedRules": []
+  },
+  {
+    "filePath": "/Volumes/jiangzhi-ssd/code/personal/eslint-security-cli/test-case/js-security/command-injection.js",
+    "messages": [
+      {
+        "ruleId": null,
+        "nodeType": null,
+        "fatal": true,
+        "severity": 2,
+        "message": "Parsing error: Binding arguments in strict mode",
+        "line": 421,
+        "column": 11
+      }
+    ],
+    "suppressedMessages": [],
+    "errorCount": 1,
+    "fatalErrorCount": 1,
+    "warningCount": 0,
+    "fixableErrorCount": 0,
+    "fixableWarningCount": 0,
+    "source": "/**\n * 命令注入漏洞示例\n * 相关规则：\n * - CWE-78: OS Command Injection\n * - CWE-77: Command Injection\n * - OWASP Top 10:2017-A1-Injection\n * - OWASP Top 10:2021-A03-Injection\n * - PCI DSS V3.2.1-Requirement 6.5.1\n * - CWE Top 25:2023-CWE-78\n */\n\nconst express = require('express');\nconst { exec, spawn, execSync } = require('child_process');\nconst fs = require('fs');\nconst path = require('path');\n\nconst app = express();\napp.use(express.json());\napp.use(express.urlencoded({ extended: true }));\n\n// 1. 直接执行用户输入的系统命令\napp.get('/ping', (req, res) => {\n    const host = req.query.host;\n    \n    if (!host) {\n        res.status(400).send('缺少主机参数');\n        return;\n    }\n    \n    // 危险：直接拼接用户输入到命令中\n    const command = `ping -c 4 ${host}`;\n    \n    console.log(`执行命令: ${command}`);\n    \n    exec(command, (error, stdout, stderr) => {\n        if (error) {\n            // 泄露系统信息\n            res.status(500).json({\n                error: error.message,\n                command: command,\n                stderr: stderr\n            });\n            return;\n        }\n        \n        res.json({\n            output: stdout,\n            command: command\n        });\n    });\n});\n\n// 2. 使用spawn执行命令 - 同样存在注入风险\napp.get('/nslookup', (req, res) => {\n    const domain = req.query.domain;\n    const type = req.query.type || 'A';\n    \n    // 危险：用户输入直接作为命令参数\n    const nslookup = spawn('nslookup', ['-type=' + type, domain]);\n    \n    let output = '';\n    let errorOutput = '';\n    \n    nslookup.stdout.on('data', (data) => {\n        output += data.toString();\n    });\n    \n    nslookup.stderr.on('data', (data) => {\n        errorOutput += data.toString();\n    });\n    \n    nslookup.on('close', (code) => {\n        if (code !== 0) {\n            res.status(500).json({\n                error: '命令执行失败',\n                code: code,\n                stderr: errorOutput,\n                command: `nslookup -type=${type} ${domain}`\n            });\n        } else {\n            res.json({\n                output: output,\n                code: code\n            });\n        }\n    });\n});\n\n// 3. 文件处理中的命令注入\napp.post('/convert', (req, res) => {\n    const inputFile = req.body.inputFile;\n    const outputFormat = req.body.format;\n    const options = req.body.options || '';\n    \n    // 危险：文件转换命令注入\n    const convertCommand = `convert ${inputFile} ${options} output.${outputFormat}`;\n    \n    exec(convertCommand, (error, stdout, stderr) => {\n        if (error) {\n            res.status(500).json({\n                error: error.message,\n                command: convertCommand,\n                workingDirectory: process.cwd()\n            });\n            return;\n        }\n        \n        // 读取输出文件并返回\n        fs.readFile(`output.${outputFormat}`, (err, data) => {\n            if (err) {\n                res.status(500).json({ error: '读取输出文件失败' });\n                return;\n            }\n            \n            res.json({\n                success: true,\n                fileSize: data.length,\n                command: convertCommand\n            });\n            \n            // 清理临时文件\n            fs.unlink(`output.${outputFormat}`, () => {});\n        });\n    });\n});\n\n// 4. 备份功能中的命令注入\napp.get('/backup', (req, res) => {\n    const database = req.query.db;\n    const backupType = req.query.type || 'full';\n    const compression = req.query.compress || 'gzip';\n    \n    // 危险：数据库备份命令注入\n    let backupCommand;\n    if (backupType === 'full') {\n        backupCommand = `mysqldump -u root -ppassword ${database} | ${compression} > backup_${database}_$(date +%Y%m%d).sql.gz`;\n    } else {\n        backupCommand = `mysqldump -u root -ppassword --no-data ${database} > backup_${database}_schema.sql`;\n    }\n    \n    console.log(`执行备份命令: ${backupCommand}`);\n    \n    exec(backupCommand, (error, stdout, stderr) => {\n        if (error) {\n            res.status(500).json({\n                error: error.message,\n                command: backupCommand,\n                database: database\n            });\n            return;\n        }\n        \n        res.json({\n            success: true,\n            message: `数据库 ${database} 备份完成`,\n            command: backupCommand\n        });\n    });\n});\n\n// 5. 网络工具中的命令注入\napp.get('/traceroute', (req, res) => {\n    const target = req.query.target;\n    const options = req.query.options || '';\n    const maxHops = req.query.maxHops || 30;\n    \n    // 危险：traceroute命令注入\n    const tracerouteCommand = `traceroute ${options} -m ${maxHops} ${target}`;\n    \n    exec(tracerouteCommand, (error, stdout, stderr) => {\n        if (error) {\n            res.status(500).json({\n                error: error.message,\n                command: tracerouteCommand,\n                stderr: stderr\n            });\n            return;\n        }\n        \n        res.json({\n            output: stdout,\n            target: target,\n            command: tracerouteCommand\n        });\n    });\n});\n\n// 6. 文件搜索功能中的命令注入\napp.get('/search-files', (req, res) => {\n    const directory = req.query.dir;\n    const pattern = req.query.pattern;\n    const fileType = req.query.type || '*';\n    \n    // 危险：find命令注入\n    const searchCommand = `find ${directory} -name \"${pattern}\" -type ${fileType === 'dir' ? 'd' : 'f'}`;\n    \n    exec(searchCommand, (error, stdout, stderr) => {\n        if (error) {\n            res.status(500).json({\n                error: error.message,\n                command: searchCommand,\n                directory: directory\n            });\n            return;\n        }\n        \n        const files = stdout.split('\\n').filter(line => line.trim() !== '');\n        res.json({\n            files: files,\n            count: files.length,\n            command: searchCommand\n        });\n    });\n});\n\n// 7. 系统信息收集中的命令注入\napp.get('/system-info', (req, res) => {\n    const infoType = req.query.type || 'basic';\n    const format = req.query.format || 'json';\n    \n    let command;\n    switch (infoType) {\n        case 'cpu':\n            command = `lscpu ${req.query.options || ''}`;\n            break;\n        case 'memory':\n            command = `free -h ${req.query.options || ''}`;\n            break;\n        case 'disk':\n            command = `df -h ${req.query.options || ''}`;\n            break;\n        case 'network':\n            command = `ip addr show ${req.query.interface || ''}`;\n            break;\n        default:\n            command = `uname -a ${req.query.options || ''}`;\n    }\n    \n    exec(command, (error, stdout, stderr) => {\n        if (error) {\n            res.status(500).json({\n                error: error.message,\n                command: command,\n                infoType: infoType\n            });\n            return;\n        }\n        \n        if (format === 'json') {\n            res.json({\n                infoType: infoType,\n                output: stdout,\n                command: command\n            });\n        } else {\n            res.type('text/plain').send(stdout);\n        }\n    });\n});\n\n// 8. 使用execSync同步执行命令\napp.get('/sync-command', (req, res) => {\n    const command = req.query.cmd;\n    const timeout = parseInt(req.query.timeout) || 5000;\n    \n    try {\n        // 危险：同步执行用户提供的命令\n        const output = execSync(command, {\n            timeout: timeout,\n            encoding: 'utf8',\n            shell: '/bin/bash'\n        });\n        \n        res.json({\n            output: output,\n            command: command,\n            timeout: timeout\n        });\n    } catch (error) {\n        res.status(500).json({\n            error: error.message,\n            command: command,\n            stderr: error.stderr ? error.stderr.toString() : '',\n            stdout: error.stdout ? error.stdout.toString() : ''\n        });\n    }\n});\n\n// 9. 批量处理中的命令注入\napp.post('/batch-process', (req, res) => {\n    const commands = req.body.commands; // 数组形式的命令列表\n    const parallel = req.body.parallel || false;\n    \n    const results = [];\n    let completed = 0;\n    \n    if (parallel) {\n        // 并行执行多个命令\n        commands.forEach((cmd, index) => {\n            exec(cmd, (error, stdout, stderr) => {\n                results[index] = {\n                    command: cmd,\n                    output: stdout,\n                    error: error ? error.message : null,\n                    stderr: stderr\n                };\n                \n                completed++;\n                if (completed === commands.length) {\n                    res.json({\n                        results: results,\n                        totalCommands: commands.length,\n                        parallel: true\n                    });\n                }\n            });\n        });\n    } else {\n        // 串行执行命令\n        function executeNext(index) {\n            if (index >= commands.length) {\n                res.json({\n                    results: results,\n                    totalCommands: commands.length,\n                    parallel: false\n                });\n                return;\n            }\n            \n            const cmd = commands[index];\n            exec(cmd, (error, stdout, stderr) => {\n                results.push({\n                    command: cmd,\n                    output: stdout,\n                    error: error ? error.message : null,\n                    stderr: stderr\n                });\n                \n                executeNext(index + 1);\n            });\n        }\n        \n        executeNext(0);\n    }\n});\n\n// 10. 管道命令中的注入\napp.get('/pipe-command', (req, res) => {\n    const input = req.query.input;\n    const filters = req.query.filters || ''; // 逗号分隔的过滤器\n    const outputFile = req.query.output;\n    \n    // 构建管道命令\n    let pipeline = `echo \"${input}\"`;\n    \n    if (filters) {\n        const filterList = filters.split(',');\n        filterList.forEach(filter => {\n            pipeline += ` | ${filter.trim()}`;\n        });\n    }\n    \n    if (outputFile) {\n        pipeline += ` > ${outputFile}`;\n    }\n    \n    // 危险：复杂的管道命令注入\n    exec(pipeline, (error, stdout, stderr) => {\n        if (error) {\n            res.status(500).json({\n                error: error.message,\n                pipeline: pipeline,\n                stderr: stderr\n            });\n            return;\n        }\n        \n        res.json({\n            output: stdout,\n            pipeline: pipeline,\n            filters: filters.split(',')\n        });\n    });\n});\n\n// 11. 环境变量操作中的命令注入\napp.post('/set-env', (req, res) => {\n    const envVars = req.body.envVars; // 对象形式的环境变量\n    const command = req.body.command;\n    \n    // 设置环境变量\n    for (const [key, value] of Object.entries(envVars)) {\n        process.env[key] = value;\n    }\n    \n    // 危险：在修改后的环境中执行命令\n    exec(command, { \n        env: { ...process.env, ...envVars },\n        shell: '/bin/bash'\n    }, (error, stdout, stderr) => {\n        if (error) {\n            res.status(500).json({\n                error: error.message,\n                command: command,\n                envVars: envVars\n            });\n            return;\n        }\n        \n        res.json({\n            output: stdout,\n            command: command,\n            environment: envVars\n        });\n    });\n});\n\n// 12. 使用shell元字符的命令注入\napp.get('/advanced-command', (req, res) => {\n    const baseCommand = req.query.base;\n    const arguments = req.query.args || '';\n    const redirect = req.query.redirect || '';\n    const background = req.query.background === 'true';\n    \n    // 构建复杂的shell命令\n    let command = baseCommand;\n    \n    if (arguments) {\n        command += ' ' + arguments;\n    }\n    \n    if (redirect) {\n        command += ' ' + redirect;\n    }\n    \n    if (background) {\n        command += ' &';\n    }\n    \n    // 极度危险：允许使用shell元字符\n    exec(command, {\n        shell: '/bin/bash',\n        timeout: 30000\n    }, (error, stdout, stderr) => {\n        if (error) {\n            res.status(500).json({\n                error: error.message,\n                command: command,\n                signal: error.signal\n            });\n            return;\n        }\n        \n        res.json({\n            output: stdout,\n            command: command,\n            background: background\n        });\n    });\n});\n\napp.listen(3000, () => {\n    console.log('命令注入漏洞演示服务器运行在端口3000');\n});",
+    "usedDeprecatedRules": []
+  },
+  {
+    "filePath": "/Volumes/jiangzhi-ssd/code/personal/eslint-security-cli/test-case/js-security/sql-injection.js",
+    "messages": [
+      {
+        "ruleId": "sonarjs/x-powered-by",
+        "severity": 2,
+        "message": "This framework implicitly discloses version information by default. Make sure it is safe here.",
+        "line": 13,
+        "column": 7,
+        "nodeType": "Identifier",
+        "messageId": "headerDefault",
+        "endLine": 13,
+        "endColumn": 10
+      },
+      {
+        "ruleId": "sonarjs/no-hardcoded-passwords",
+        "severity": 2,
+        "message": "Review this potentially hard-coded password.",
+        "line": 19,
+        "column": 15,
+        "nodeType": "Literal",
+        "messageId": "reviewPassword",
+        "endLine": 19,
+        "endColumn": 28
+      }
+    ],
+    "suppressedMessages": [],
+    "errorCount": 2,
+    "fatalErrorCount": 0,
+    "warningCount": 0,
+    "fixableErrorCount": 0,
+    "fixableWarningCount": 0,
+    "source": "/**\n * SQL注入漏洞示例\n * 相关规则：\n * - CWE-89: SQL Injection\n * - OWASP Top 10:2017-A1-Injection\n * - OWASP Top 10:2021-A03-Injection\n * - PCI DSS V3.2.1-Requirement 6.5.1\n * - CWE Top 25:2023-CWE-89\n */\n\nconst mysql = require('mysql');\nconst express = require('express');\nconst app = express();\n\n// 创建数据库连接\nconst connection = mysql.createConnection({\n    host: 'localhost',\n    user: 'root',\n    password: 'password123', // 明文密码 - 违反PCI DSS\n    database: 'users'\n});\n\n// 危险的SQL查询 - 直接拼接用户输入\napp.get('/user', (req, res) => {\n    const userId = req.query.id; // 用户输入未经过滤\n    \n    // CWE-89: SQL注入漏洞 - 直接拼接SQL字符串\n    const query = \"SELECT * FROM users WHERE id = '\" + userId + \"'\";\n    \n    console.log(\"执行SQL查询: \" + query);\n    \n    connection.query(query, (error, results) => {\n        if (error) {\n            // CWE-209: 信息泄露 - 将详细错误信息返回给用户\n            res.status(500).json({\n                error: error.message,\n                sql: query\n            });\n            return;\n        }\n        res.json(results);\n    });\n});\n\n// 另一个SQL注入示例 - 使用模板字符串\napp.post('/login', (req, res) => {\n    const username = req.body.username;\n    const password = req.body.password;\n    \n    // 危险的做法 - 使用模板字符串拼接SQL\n    const loginQuery = `SELECT * FROM users WHERE username = '${username}' AND password = '${password}'`;\n    \n    connection.query(loginQuery, (error, results) => {\n        if (error) {\n            // 详细错误信息泄露\n            res.status(500).send(`数据库错误: ${error.message}`);\n            return;\n        }\n        \n        if (results.length > 0) {\n            // 会话管理不当 - 使用可预测的会话ID\n            req.session.userId = results[0].id;\n            req.session.username = results[0].username;\n            \n            // 在响应中泄露敏感信息\n            res.json({\n                success: true,\n                user: results[0], // 包含密码哈希等敏感信息\n                sessionId: req.sessionID\n            });\n        } else {\n            res.json({ success: false });\n        }\n    });\n});\n\n// 批量删除功能中的SQL注入\napp.delete('/users', (req, res) => {\n    const ids = req.body.ids; // 假设是逗号分隔的ID列表\n    \n    // 极度危险 - 直接拼接IN子句\n    const deleteQuery = \"DELETE FROM users WHERE id IN (\" + ids + \")\";\n    \n    connection.query(deleteQuery, (error, results) => {\n        if (error) {\n            res.status(500).json({ error: error.message });\n            return;\n        }\n        res.json({ deleted: results.affectedRows });\n    });\n});\n\n// 搜索功能中的SQL注入\napp.get('/search', (req, res) => {\n    const keyword = req.query.q;\n    const orderBy = req.query.sort || 'name'; // 用户可控的排序字段\n    \n    // 动态拼接ORDER BY子句 - 可能导致SQL注入\n    const searchQuery = \"SELECT * FROM products WHERE name LIKE '%\" + keyword + \"%' ORDER BY \" + orderBy;\n    \n    connection.query(searchQuery, (error, results) => {\n        if (error) {\n            res.status(500).json({ error: error.message });\n            return;\n        }\n        res.json(results);\n    });\n});\n\n// 存储过程中的SQL注入\napp.get('/report', (req, res) => {\n    const startDate = req.query.start;\n    const endDate = req.query.end;\n    const reportType = req.query.type;\n    \n    // 动态调用存储过程 - 危险\n    const procedureCall = \"CALL generate_report_\" + reportType + \"('\" + startDate + \"', '\" + endDate + \"')\";\n    \n    connection.query(procedureCall, (error, results) => {\n        if (error) {\n            // 泄露数据库结构信息\n            res.status(500).json({\n                error: error.message,\n                procedure: reportType,\n                hint: \"可用的报告类型: sales, inventory, users\"\n            });\n            return;\n        }\n        res.json(results[0]);\n    });\n});\n\n// 使用LIKE操作符时的SQL注入\napp.get('/products', (req, res) => {\n    const searchTerm = req.query.search;\n    \n    // LIKE操作符中的注入漏洞\n    const likeQuery = \"SELECT * FROM products WHERE description LIKE '%\" + searchTerm + \"%' ESCAPE '!'\";\n    \n    connection.query(likeQuery, (error, results) => {\n        if (error) {\n            res.status(500).json({ error: error.message });\n            return;\n        }\n        res.json(results);\n    });\n});\n\napp.listen(3000, () => {\n    console.log('服务器运行在端口3000');\n    console.log('数据库连接信息:', connection.config); // 泄露数据库配置信息\n});",
+    "usedDeprecatedRules": []
+  },
+  {
+    "filePath": "/Volumes/jiangzhi-ssd/code/personal/eslint-security-cli/test-case/js-security/xss-vulnerabilities.js",
+    "messages": [
+      {
+        "ruleId": "sonarjs/x-powered-by",
+        "severity": 2,
+        "message": "This framework implicitly discloses version information by default. Make sure it is safe here.",
+        "line": 12,
+        "column": 7,
+        "nodeType": "Identifier",
+        "messageId": "headerDefault",
+        "endLine": 12,
+        "endColumn": 10
+      }
+    ],
+    "suppressedMessages": [],
+    "errorCount": 1,
+    "fatalErrorCount": 0,
+    "warningCount": 0,
+    "fixableErrorCount": 0,
+    "fixableWarningCount": 0,
+    "source": "/**\n * XSS跨站脚本攻击漏洞示例\n * 相关规则：\n * - CWE-79: Cross-site Scripting (XSS)\n * - OWASP Top 10:2017-A7-Cross-Site Scripting (XSS)\n * - OWASP Top 10:2021-A03-Injection (包含XSS)\n * - PCI DSS V3.2.1-Requirement 6.5.7\n * - CWE Top 25:2023-CWE-79\n */\n\nconst express = require('express');\nconst app = express();\nconst cookieParser = require('cookie-parser');\n\napp.use(cookieParser());\napp.use(express.urlencoded({ extended: true }));\napp.use(express.json());\n\n// 存储用户评论的数组（模拟数据库）\nlet comments = [];\nlet userProfiles = {};\n\n// 反射型XSS漏洞 - 直接输出用户输入\napp.get('/search', (req, res) => {\n    const searchTerm = req.query.q;\n\n    // 危险：直接将用户输入嵌入HTML响应中\n    res.send(`\n        <html>\n        <head><title>搜索结果</title></head>\n        <body>\n            <h1>搜索 \"${searchTerm}\" 的结果</h1>\n            <p>没有找到关于 \"${searchTerm}\" 的结果</p>\n        </body>\n        </html>\n    `);\n});\n\n// 存储型XSS漏洞 - 用户评论功能\napp.post('/comment', (req, res) => {\n    const comment = req.body.comment;\n    const username = req.body.username || '匿名用户';\n\n    // 危险：未对用户输入进行任何过滤或转义\n    const newComment = {\n        id: comments.length + 1,\n        username: username,\n        comment: comment, // 直接存储用户输入的HTML/JS代码\n        timestamp: new Date().toISOString()\n    };\n\n    comments.push(newComment);\n\n    // 重定向到评论页面\n    res.redirect('/comments');\n});\n\n// 显示评论 - 存储型XSS\napp.get('/comments', (req, res) => {\n    let html = `\n        <html>\n        <head><title>用户评论</title></head>\n        <body>\n            <h1>用户评论</h1>\n            <form action=\"/comment\" method=\"POST\">\n                <input type=\"text\" name=\"username\" placeholder=\"用户名\">\n                <textarea name=\"comment\" placeholder=\"发表评论\"></textarea>\n                <button type=\"submit\">提交评论</button>\n            </form>\n            <div id=\"comments\">\n    `;\n\n    // 危险：直接输出用户评论内容，未进行HTML转义\n    comments.forEach(comment => {\n        html += `\n            <div class=\"comment\">\n                <h3>${comment.username}</h3>\n                <p>${comment.comment}</p>\n                <small>${comment.timestamp}</small>\n            </div>\n        `;\n    });\n\n    html += `\n            </div>\n        </body>\n        </html>\n    `;\n\n    res.send(html);\n});\n\n// DOM型XSS漏洞 - 使用用户输入操作DOM\napp.get('/profile', (req, res) => {\n    const username = req.query.username || req.cookies.username || '';\n    const theme = req.query.theme || 'light';\n\n    res.send(`\n        <html>\n        <head><title>用户资料</title></head>\n        <body>\n            <h1>用户资料</h1>\n            <div id=\"welcome-message\"></div>\n            <script>\n                // 危险：直接将用户输入插入到DOM中\n                var username = '${username}';\n                var theme = '${theme}';\n                \n                // DOM型XSS - 使用innerHTML\n                document.getElementById('welcome-message').innerHTML = \n                    '<h2>欢迎, ' + username + '!</h2>' +\n                    '<p>当前主题: ' + theme + '</p>';\n                \n                // 另一个DOM型XSS示例 - 使用document.write\n                if (window.location.hash) {\n                    document.write('<div>哈希参数: ' + window.location.hash.substring(1) + '</div>');\n                }\n                \n                // 危险的eval使用\n                var userPrefs = '${req.query.prefs || '{}'}';\n                eval('var prefs = ' + userPrefs);\n                \n                // 使用用户输入设置样式\n                document.body.style.backgroundColor = '${req.query.bgcolor || 'white'}';\n            </script>\n        </body>\n        </html>\n    `);\n});\n\n// 富文本编辑器中的XSS漏洞\napp.post('/save-profile', (req, res) => {\n    const userId = req.body.userId;\n    const bio = req.body.bio;\n    const customCSS = req.body.customCSS;\n\n    // 危险：允许用户输入HTML和CSS而不进行充分过滤\n    userProfiles[userId] = {\n        bio: bio, // 可能包含恶意脚本\n        customCSS: customCSS, // 可能包含CSS表达式\n        lastUpdated: new Date().toISOString()\n    };\n\n    res.json({ success: true });\n});\n\n// 显示用户资料 - 输出未过滤的内容\napp.get('/user/:id', (req, res) => {\n    const userId = req.params.id;\n    const profile = userProfiles[userId];\n\n    if (!profile) {\n        res.status(404).send('用户不存在');\n        return;\n    }\n\n    res.send(`\n        <html>\n        <head>\n            <title>用户资料 - ${userId}</title>\n            <style>${profile.customCSS}</style> <!-- 危险的CSS注入 -->\n        </head>\n        <body>\n            <h1>用户资料</h1>\n            <div class=\"bio\">\n                ${profile.bio} <!-- 危险的HTML注入 -->\n            </div>\n            <script>\n                // 在JavaScript中使用用户数据\n                var userBio = '${profile.bio.replace(/'/g, \"\\\\'\")}';\n                console.log('用户简介: ' + userBio);\n                \n                // 危险：使用用户输入作为JavaScript代码\n                var userScript = '${req.query.script || ''}';\n                if (userScript) {\n                    eval(userScript); // 极度危险！\n                }\n            </script>\n        </body>\n        </html>\n    `);\n});\n\n// JSONP接口中的XSS漏洞\napp.get('/api/userdata', (req, res) => {\n    const callback = req.query.callback;\n    const userId = req.query.userId;\n\n    const userData = {\n        id: userId,\n        name: '用户' + userId,\n        email: 'user' + userId + '@example.com'\n    };\n\n    // 危险：未对回调函数名进行验证\n    if (callback) {\n        // JSONP响应 - 可能导致XSS\n        res.type('text/javascript');\n        res.send(`${callback}(${JSON.stringify(userData)})`);\n    } else {\n        res.json(userData);\n    }\n});\n\n// 文件上传功能中的XSS漏洞\napp.post('/upload', (req, res) => {\n    const filename = req.body.filename;\n    const fileContent = req.body.content;\n\n    // 危险：未验证文件类型和内容\n    if (filename.endsWith('.html')) {\n        // 允许上传HTML文件\n        res.send(`\n            <html>\n            <body>\n                <h1>文件上传成功</h1>\n                <div>\n                    文件名: ${filename}\n                    <br>\n                    内容预览:\n                    <iframe srcdoc=\"${fileContent.replace(/\"/g, '&quot;')}\" width=\"100%\" height=\"300\"></iframe>\n                </div>\n            </body>\n            </html>\n        `);\n    }\n});\n\n// WebSocket消息中的XSS漏洞\nconst WebSocket = require('ws');\nconst wss = new WebSocket.Server({ port: 8080 });\n\nwss.on('connection', function connection(ws) {\n    ws.on('message', function incoming(message) {\n        const data = JSON.parse(message);\n\n        // 危险：广播未过滤的消息到其他客户端\n        wss.clients.forEach(function each(client) {\n            if (client !== ws && client.readyState === WebSocket.OPEN) {\n                client.send(JSON.stringify({\n                    type: 'message',\n                    content: data.content, // 可能包含恶意脚本\n                    sender: data.sender,\n                    timestamp: new Date().toISOString()\n                }));\n            }\n        });\n    });\n});\n\n// 错误页面中的XSS漏洞\napp.use((err, req, res, next) => {\n    // 危险：在错误页面中显示用户输入\n    res.status(500).send(`\n        <html>\n        <body>\n            <h1>服务器错误</h1>\n            <p>错误详情: ${err.message}</p>\n            <p>请求URL: ${req.url}</p>\n            <p>用户代理: ${req.headers['user-agent']}</p>\n        </body>\n        </html>\n    `);\n});\n\napp.listen(3000, () => {\n    console.log('XSS漏洞演示服务器运行在端口3000');\n});",
+    "usedDeprecatedRules": []
+  },
+  {
+    "filePath": "/Volumes/jiangzhi-ssd/code/personal/eslint-security-cli/test-case/js-security/access-control-bypass.js",
+    "messages": [
+      {
+        "ruleId": "sonarjs/x-powered-by",
+        "severity": 2,
+        "message": "This framework implicitly discloses version information by default. Make sure it is safe here.",
+        "line": 21,
+        "column": 7,
+        "nodeType": "Identifier",
+        "messageId": "headerDefault",
+        "endLine": 21,
+        "endColumn": 10
+      },
+      {
+        "ruleId": "sonarjs/no-hardcoded-passwords",
+        "severity": 2,
+        "message": "Review this potentially hard-coded password.",
+        "line": 28,
+        "column": 43,
+        "nodeType": "Literal",
+        "messageId": "reviewPassword",
+        "endLine": 28,
+        "endColumn": 53
+      },
+      {
+        "ruleId": "sonarjs/no-hardcoded-passwords",
+        "severity": 2,
+        "message": "Review this potentially hard-coded password.",
+        "line": 29,
+        "column": 43,
+        "nodeType": "Literal",
+        "messageId": "reviewPassword",
+        "endLine": 29,
+        "endColumn": 52
+      },
+      {
+        "ruleId": "sonarjs/no-hardcoded-passwords",
+        "severity": 2,
+        "message": "Review this potentially hard-coded password.",
+        "line": 30,
+        "column": 43,
+        "nodeType": "Literal",
+        "messageId": "reviewPassword",
+        "endLine": 30,
+        "endColumn": 52
+      },
+      {
+        "ruleId": "sonarjs/content-length",
+        "severity": 2,
+        "message": "Make sure the content length limit is safe here.",
+        "line": 138,
+        "column": 16,
+        "nodeType": "Identifier",
+        "messageId": "safeLimit",
+        "endLine": 138,
+        "endColumn": 22
+      },
+      {
+        "ruleId": "sonarjs/no-ignored-exceptions",
+        "severity": 2,
+        "message": "Handle this exception or don't catch it at all.",
+        "line": 193,
+        "column": 7,
+        "nodeType": "CatchClause",
+        "messageId": "handleException",
+        "endLine": 195,
+        "endColumn": 6
+      }
+    ],
+    "suppressedMessages": [],
+    "errorCount": 6,
+    "fatalErrorCount": 0,
+    "warningCount": 0,
+    "fixableErrorCount": 0,
+    "fixableWarningCount": 0,
+    "source": "/**\n * 访问控制缺陷示例\n * 相关规则：\n * - CWE-284: Improper Access Control\n * - CWE-285: Improper Authorization\n * - CWE-287: Improper Authentication\n * - CWE-434: Unrestricted Upload of File with Dangerous Type\n * - CWE-639: Authorization Bypass Through User-Controlled Key\n * - CWE-22: Improper Limitation of a Pathname to a Restricted Directory\n * - OWASP Top 10:2017-A5-Broken Access Control\n * - OWASP Top 10:2021-A01-Broken Access Control\n * - PCI DSS V3.2.1-Requirement 7, 8\n * - CWE Top 25:2023-CWE-284\n */\n\nconst express = require('express');\nconst fs = require('fs');\nconst path = require('path');\nconst multer = require('multer');\nconst jwt = require('jsonwebtoken');\nconst app = express();\n\napp.use(express.json());\napp.use(express.urlencoded({ extended: true }));\n\n// 1. 缺少身份验证检查\nconst users = [\n    { id: 1, username: 'admin', password: 'admin123', role: 'admin', email: 'admin@example.com' },\n    { id: 2, username: 'user1', password: 'user123', role: 'user', email: 'user1@example.com' },\n    { id: 3, username: 'user2', password: 'user456', role: 'user', email: 'user2@example.com' }\n];\n\n// 危险：无需身份验证即可获取所有用户信息\napp.get('/users/all', (req, res) => {\n    // 缺少身份验证检查\n    res.json({\n        users: users,\n        count: users.length,\n        warning: '此接口缺少身份验证，任何人都可以访问用户数据'\n    });\n});\n\n// 危险：直接通过ID获取用户信息，无需身份验证\napp.get('/users/:id', (req, res) => {\n    const userId = parseInt(req.params.id);\n    \n    // 缺少身份验证和授权检查\n    const user = users.find(u => u.id === userId);\n    \n    if (user) {\n        res.json({\n            user: user,\n            sensitiveData: {\n                password: user.password, // 泄露密码！\n                email: user.email,\n                role: user.role\n            },\n            warning: '缺少身份验证和授权检查'\n        });\n    } else {\n        res.status(404).json({ error: '用户未找到' });\n    }\n});\n\n// 2. 用户控制的密钥绕过授权\napp.get('/users/profile/:username', (req, res) => {\n    const username = req.params.username;\n    \n    // 危险：用户可以通过修改URL参数访问其他用户的资料\n    const user = users.find(u => u.username === username);\n    \n    if (user) {\n        res.json({\n            profile: {\n                id: user.id,\n                username: user.username,\n                email: user.email,\n                role: user.role,\n                password: user.password // 泄露敏感信息！\n            },\n            bypassMethod: 'user_controlled_key',\n            warning: '通过修改URL参数可以访问其他用户的敏感信息'\n        });\n    } else {\n        res.status(404).json({ error: '用户未找到' });\n    }\n});\n\n// 3. 缺少角色权限检查\napp.delete('/users/:id', (req, res) => {\n    const userId = parseInt(req.params.id);\n    \n    // 危险：缺少管理员权限检查\n    // 任何用户都可以删除其他用户\n    const userIndex = users.findIndex(u => u.id === userId);\n    \n    if (userIndex !== -1) {\n        const deletedUser = users.splice(userIndex, 1)[0];\n        \n        res.json({\n            message: '用户删除成功',\n            deletedUser: deletedUser,\n            remainingUsers: users.length,\n            warning: '缺少角色权限检查，普通用户也可以删除其他用户'\n        });\n    } else {\n        res.status(404).json({ error: '用户未找到' });\n    }\n});\n\n// 4. 不安全的直接对象引用（IDOR）\nconst documents = [\n    { id: 1, title: 'Public Document', content: 'This is public content', owner: 'user1', isPublic: true },\n    { id: 2, title: 'Private Document 1', content: 'This is private content for user1', owner: 'user1', isPublic: false },\n    { id: 3, title: 'Private Document 2', content: 'This is private content for user2', owner: 'user2', isPublic: false },\n    { id: 4, title: 'Admin Document', content: 'This is admin only content', owner: 'admin', isPublic: false, adminOnly: true }\n];\n\napp.get('/documents/:id', (req, res) => {\n    const docId = parseInt(req.params.id);\n    \n    // 危险：缺少所有权检查\n    const document = documents.find(d => d.id === docId);\n    \n    if (document) {\n        res.json({\n            document: document,\n            access: 'granted_without_ownership_check',\n            vulnerability: 'IDOR',\n            warning: '通过修改文档ID可以访问其他用户的私有文档'\n        });\n    } else {\n        res.status(404).json({ error: '文档未找到' });\n    }\n});\n\n// 5. 文件上传缺少类型检查\nconst upload = multer({ dest: 'uploads/' });\n\napp.post('/upload/file', upload.single('file'), (req, res) => {\n    // 危险：缺少文件类型验证\n    if (!req.file) {\n        return res.status(400).json({ error: '没有上传文件' });\n    }\n    \n    const file = req.file;\n    const originalName = file.originalname;\n    \n    // 危险：允许上传任何类型的文件\n    const allowedExtensions = ['.txt', '.pdf', '.doc', '.jpg', '.png'];\n    const fileExtension = path.extname(originalName).toLowerCase();\n    \n    // 这里虽然有检查，但是很容易被绕过\n    if (!allowedExtensions.includes(fileExtension)) {\n        // 但仍然保存文件，只是给出警告\n        console.warn(`上传了潜在危险的文件类型: ${fileExtension}`);\n    }\n    \n    res.json({\n        message: '文件上传成功',\n        filename: originalName,\n        size: file.size,\n        path: file.path,\n        mimetype: file.mimetype,\n        extension: fileExtension,\n        security: 'vulnerable',\n        warning: '缺少严格的文件类型验证，可能上传恶意文件'\n    });\n});\n\n// 6. 路径遍历结合访问控制缺陷\napp.get('/files/:filename', (req, res) => {\n    const filename = req.params.filename;\n    \n    // 危险：缺少路径验证和访问控制\n    const filePath = path.join(__dirname, 'files', filename);\n    \n    try {\n        if (fs.existsSync(filePath)) {\n            const content = fs.readFileSync(filePath, 'utf8');\n            \n            res.json({\n                filename: filename,\n                content: content,\n                path: filePath,\n                access: 'unrestricted',\n                vulnerability: 'path_traversal + missing_access_control',\n                warning: '可以访问任意文件，包括敏感系统文件'\n            });\n        } else {\n            res.status(404).json({ error: '文件未找到' });\n        }\n    } catch (error) {\n        res.status(500).json({ error: '读取文件失败' });\n    }\n});\n\n// 7. 管理员功能缺少权限验证\napp.get('/admin/users', (req, res) => {\n    // 危险：缺少管理员权限验证\n    const adminUsers = users.filter(u => u.role === 'admin');\n    \n    res.json({\n        adminUsers: adminUsers,\n        totalAdmins: adminUsers.length,\n        accessLevel: 'assumed_admin',\n        warning: '管理员功能缺少权限验证'\n    });\n});\n\napp.post('/admin/reset-password/:username', (req, res) => {\n    const username = req.params.username;\n    const { newPassword } = req.body;\n    \n    // 危险：缺少管理员身份验证\n    const user = users.find(u => u.username === username);\n    \n    if (user) {\n        user.password = newPassword; // 明文存储密码！\n        \n        res.json({\n            message: '密码重置成功',\n            username: username,\n            newPassword: newPassword, // 泄露新密码！\n            resetBy: 'unauthorized_user',\n            warning: '管理员功能缺少身份验证和授权检查'\n        });\n    } else {\n        res.status(404).json({ error: '用户未找到' });\n    }\n});\n\n// 8. JWT令牌验证不当\nconst JWT_SECRET = 'my-super-secret-jwt-key'; // 硬编码密钥\n\nfunction generateToken(user) {\n    return jwt.sign({\n        username: user.username,\n        role: user.role\n    }, JWT_SECRET, { expiresIn: '24h' });\n}\n\napp.post('/login', (req, res) => {\n    const { username, password } = req.body;\n    \n    const user = users.find(u => u.username === username && u.password === password);\n    \n    if (user) {\n        const token = generateToken(user);\n        \n        res.json({\n            message: '登录成功',\n            token: token,\n            user: {\n                username: user.username,\n                role: user.role\n            },\n            warning: 'JWT使用硬编码密钥，且缺少适当的验证'\n        });\n    } else {\n        res.status(401).json({ error: '用户名或密码错误' });\n    }\n});\n\n// 危险：缺少令牌验证中间件\napp.get('/protected/data', (req, res) => {\n    // 缺少JWT令牌验证\n    const authHeader = req.headers.authorization;\n    \n    if (!authHeader) {\n        // 即使没有令牌也返回数据\n        res.json({\n            data: '敏感数据',\n            access: 'unauthorized',\n            warning: '缺少身份验证检查'\n        });\n        return;\n    }\n    \n    // 即使有令牌也不验证\n    res.json({\n        data: '受保护的敏感数据',\n        token: authHeader,\n        validation: 'none',\n        warning: '令牌未经验证'\n    });\n});\n\n// 9. 功能级访问控制缺失\nconst features = {\n    exportData: true,\n    importData: true,\n    deleteAll: true,\n    modifyConfig: true,\n    viewLogs: true\n};\n\napp.get('/features', (req, res) => {\n    // 危险：缺少功能级权限检查\n    res.json({\n        availableFeatures: features,\n        access: 'unrestricted',\n        warning: '缺少功能级访问控制'\n    });\n});\n\napp.post('/features/export', (req, res) => {\n    // 危险：缺少功能级权限验证\n    const sensitiveData = {\n        users: users,\n        documents: documents,\n        systemConfig: {\n            databaseUrl: 'mongodb://localhost:27017/myapp',\n            apiKey: 'sk-1234567890abcdef',\n            jwtSecret: JWT_SECRET // 泄露JWT密钥！\n        }\n    };\n    \n    res.json({\n        message: '数据导出成功',\n        data: sensitiveData,\n        permission: 'not_checked',\n        warning: '敏感数据导出功能缺少权限验证'\n    });\n});\n\n// 10. 基于URL的访问控制绕过\napp.get('/api/v1/users', (req, res) => {\n    // 版本1：需要身份验证（假设有中间件）\n    res.json({\n        version: 'v1',\n        users: users,\n        authentication: 'required'\n    });\n});\n\napp.get('/api/v2/users', (req, res) => {\n    // 版本2：缺少身份验证（API版本绕过）\n    res.json({\n        version: 'v2',\n        users: users,\n        authentication: 'bypassed',\n        warning: '通过使用不同的API版本绕过访问控制'\n    });\n});\n\n// 11. HTTP方法绕过\napp.get('/users/:id/delete', (req, res) => {\n    // 危险：使用GET方法执行删除操作\n    const userId = parseInt(req.params.id);\n    \n    const userIndex = users.findIndex(u => u.id === userId);\n    \n    if (userIndex !== -1) {\n        const deletedUser = users.splice(userIndex, 1)[0];\n        \n        res.json({\n            message: '用户删除成功（通过GET方法）',\n            deletedUser: deletedUser,\n            method: 'GET',\n            warning: '使用GET方法执行敏感操作，容易被CSRF攻击'\n        });\n    } else {\n        res.status(404).json({ error: '用户未找到' });\n    }\n});\n\n// 12. 参数污染攻击\napp.get('/users/search', (req, res) => {\n    const { id, username, role } = req.query;\n    \n    let filteredUsers = users;\n    \n    // 危险：参数污染可能导致访问控制绕过\n    if (id) {\n        // 如果id参数被重复提交，只使用第一个值\n        const userId = Array.isArray(id) ? parseInt(id[0]) : parseInt(id);\n        filteredUsers = filteredUsers.filter(u => u.id === userId);\n    }\n    \n    if (username) {\n        const searchUsername = Array.isArray(username) ? username[0] : username;\n        filteredUsers = filteredUsers.filter(u => u.username.includes(searchUsername));\n    }\n    \n    if (role) {\n        const searchRole = Array.isArray(role) ? role[0] : role;\n        filteredUsers = filteredUsers.filter(u => u.role === searchRole);\n    }\n    \n    res.json({\n        users: filteredUsers,\n        queryParams: req.query,\n        vulnerability: 'parameter_pollution',\n        warning: '参数污染可能导致访问控制绕过'\n    });\n});\n\napp.listen(3000, () => {\n    console.log('访问控制缺陷演示服务器运行在端口3000');\n});",
+    "usedDeprecatedRules": []
+  },
+  {
+    "filePath": "/Volumes/jiangzhi-ssd/code/personal/eslint-security-cli/test-case/js-security/insecure-deserialization.js",
+    "messages": [
+      {
+        "ruleId": "sonarjs/x-powered-by",
+        "severity": 2,
+        "message": "This framework implicitly discloses version information by default. Make sure it is safe here.",
+        "line": 13,
+        "column": 7,
+        "nodeType": "Identifier",
+        "messageId": "headerDefault",
+        "endLine": 13,
+        "endColumn": 10
+      },
+      {
+        "ruleId": "sonarjs/code-eval",
+        "severity": 2,
+        "message": "Make sure that this dynamic injection or execution of code is safe.",
+        "line": 34,
+        "column": 22,
+        "nodeType": "Identifier",
+        "messageId": "safeCode",
+        "endLine": 34,
+        "endColumn": 26
+      },
+      {
+        "ruleId": "sonarjs/os-command",
+        "severity": 2,
+        "message": "Make sure that executing this OS command is safe here.",
+        "line": 38,
+        "column": 22,
+        "nodeType": "Identifier",
+        "messageId": "safeOSCommand",
+        "endLine": 38,
+        "endColumn": 30
+      },
+      {
+        "ruleId": "sonarjs/no-unused-vars",
+        "severity": 2,
+        "message": "Remove the declaration of the unused 'options' variable.",
+        "line": 57,
+        "column": 11,
+        "nodeType": "Identifier",
+        "messageId": "unusedVariable",
+        "endLine": 57,
+        "endColumn": 18
+      },
+      {
+        "ruleId": "sonarjs/no-dead-store",
+        "severity": 2,
+        "message": "Remove this useless assignment to variable \"options\".",
+        "line": 57,
+        "column": 11,
+        "nodeType": null,
+        "messageId": "removeAssignment",
+        "endLine": 57,
+        "endColumn": 18
+      },
+      {
+        "ruleId": "sonarjs/code-eval",
+        "severity": 2,
+        "message": "Make sure that this dynamic injection or execution of code is safe.",
+        "line": 116,
+        "column": 28,
+        "nodeType": "Identifier",
+        "messageId": "safeCode",
+        "endLine": 116,
+        "endColumn": 32
+      },
+      {
+        "ruleId": "sonarjs/code-eval",
+        "severity": 2,
+        "message": "Make sure that this dynamic injection or execution of code is safe.",
+        "line": 119,
+        "column": 30,
+        "nodeType": "Identifier",
+        "messageId": "safeCode",
+        "endLine": 119,
+        "endColumn": 38
+      },
+      {
+        "ruleId": "sonarjs/code-eval",
+        "severity": 2,
+        "message": "Make sure that this dynamic injection or execution of code is safe.",
+        "line": 199,
+        "column": 37,
+        "nodeType": "Identifier",
+        "messageId": "safeCode",
+        "endLine": 199,
+        "endColumn": 45
+      },
+      {
+        "ruleId": "sonarjs/code-eval",
+        "severity": 2,
+        "message": "Make sure that this dynamic injection or execution of code is safe.",
+        "line": 317,
+        "column": 56,
+        "nodeType": "Identifier",
+        "messageId": "safeCode",
+        "endLine": 317,
+        "endColumn": 60
+      },
+      {
+        "ruleId": "sonarjs/no-all-duplicated-branches",
+        "severity": 2,
+        "message": "Remove this conditional structure or edit its code blocks so that they're not all the same.",
+        "line": 350,
+        "column": 9,
+        "nodeType": "IfStatement",
+        "messageId": "removeOrEditConditionalStructure",
+        "endLine": 355,
+        "endColumn": 10
+      },
+      {
+        "ruleId": "sonarjs/code-eval",
+        "severity": 2,
+        "message": "Make sure that this dynamic injection or execution of code is safe.",
+        "line": 385,
+        "column": 26,
+        "nodeType": "Identifier",
+        "messageId": "safeCode",
+        "endLine": 385,
+        "endColumn": 30
+      },
+      {
+        "ruleId": "sonarjs/code-eval",
+        "severity": 2,
+        "message": "Make sure that this dynamic injection or execution of code is safe.",
+        "line": 388,
+        "column": 34,
+        "nodeType": "Identifier",
+        "messageId": "safeCode",
+        "endLine": 388,
+        "endColumn": 42
+      },
+      {
+        "ruleId": "sonarjs/os-command",
+        "severity": 2,
+        "message": "Make sure that executing this OS command is safe here.",
+        "line": 393,
+        "column": 26,
+        "nodeType": "Identifier",
+        "messageId": "safeOSCommand",
+        "endLine": 393,
+        "endColumn": 34
+      },
+      {
+        "ruleId": "sonarjs/no-unused-vars",
+        "severity": 2,
+        "message": "Remove the declaration of the unused 'pythonScript' variable.",
+        "line": 420,
+        "column": 11,
+        "nodeType": "Identifier",
+        "messageId": "unusedVariable",
+        "endLine": 420,
+        "endColumn": 23
+      },
+      {
+        "ruleId": "sonarjs/no-dead-store",
+        "severity": 2,
+        "message": "Remove this useless assignment to variable \"pythonScript\".",
+        "line": 420,
+        "column": 11,
+        "nodeType": null,
+        "messageId": "removeAssignment",
+        "endLine": 420,
+        "endColumn": 23
+      },
+      {
+        "ruleId": "sonarjs/os-command",
+        "severity": 2,
+        "message": "Make sure that executing this OS command is safe here.",
+        "line": 439,
+        "column": 24,
+        "nodeType": "Identifier",
+        "messageId": "safeOSCommand",
+        "endLine": 439,
+        "endColumn": 32
+      },
+      {
+        "ruleId": "sonarjs/code-eval",
+        "severity": 2,
+        "message": "Make sure that this dynamic injection or execution of code is safe.",
+        "line": 466,
+        "column": 38,
+        "nodeType": "Identifier",
+        "messageId": "safeCode",
+        "endLine": 466,
+        "endColumn": 46
+      }
+    ],
+    "suppressedMessages": [],
+    "errorCount": 17,
+    "fatalErrorCount": 0,
+    "warningCount": 0,
+    "fixableErrorCount": 0,
+    "fixableWarningCount": 0,
+    "source": "/**\n * 不安全的反序列化漏洞示例\n * 相关规则：\n * - CWE-502: Deserialization of Untrusted Data\n * - CWE-915: Improperly Controlled Modification of Dynamically-Determined Object Attributes\n * - OWASP Top 10:2017-A8-Insecure Deserialization\n * - OWASP Top 10:2021-A08-Software and Data Integrity Failures\n * - PCI DSS V3.2.1-Requirement 6.5.10\n * - CWE Top 25:2023-CWE-502\n */\n\nconst express = require('express');\nconst app = express();\nconst { exec, spawn } = require('child_process');\n\napp.use(express.json({ limit: '10mb' }));\napp.use(express.urlencoded({ extended: true, limit: '10mb' }));\n\n// 1. 使用eval()执行用户提供的代码 - 极度危险\napp.post('/execute-code', (req, res) => {\n    const code = req.body.code;\n    const language = req.body.language || 'javascript';\n    \n    if (!code) {\n        res.status(400).send('缺少代码参数');\n        return;\n    }\n    \n    try {\n        let result;\n        \n        if (language === 'javascript') {\n            // 危险：直接执行用户提供的JavaScript代码\n            result = eval(code);\n        } else if (language === 'python') {\n            // 危险：执行Python代码\n            const { execSync } = require('child_process');\n            result = execSync(`python3 -c \"${code.replace(/\"/g, '\\\\\"')}\"`, { encoding: 'utf8' });\n        }\n        \n        res.json({\n            success: true,\n            result: result,\n            language: language\n        });\n    } catch (error) {\n        res.status(500).json({\n            error: error.message,\n            language: language\n        });\n    }\n});\n\n// 2. 不安全的JSON.parse使用\napp.post('/process-json', (req, res) => {\n    const jsonData = req.body.jsonData;\n    const options = req.body.options || {};\n    \n    if (!jsonData) {\n        res.status(400).send('缺少JSON数据');\n        return;\n    }\n    \n    try {\n        // 危险：直接解析不受信任的JSON数据\n        const parsed = JSON.parse(jsonData);\n        \n        // 危险：使用用户数据调用函数\n        if (parsed.action && typeof global[parsed.action] === 'function') {\n            const result = global[parsed.action](parsed.args);\n            res.json({\n                success: true,\n                result: result,\n                action: parsed.action\n            });\n            return;\n        }\n        \n        // 危险：动态创建对象属性\n        const result = {};\n        for (const key in parsed) {\n            if (parsed.hasOwnProperty(key)) {\n                // 可能导致原型污染\n                result[key] = parsed[key];\n            }\n        }\n        \n        res.json({\n            success: true,\n            data: result,\n            original: parsed\n        });\n    } catch (error) {\n        res.status(500).json({\n            error: error.message,\n            jsonData: jsonData\n        });\n    }\n});\n\n// 3. 不安全的JavaScript反序列化\napp.post('/deserialize-js', (req, res) => {\n    const serializedData = req.body.data;\n    const method = req.body.method || 'eval';\n    \n    if (!serializedData) {\n        res.status(400).send('缺少序列化数据');\n        return;\n    }\n    \n    try {\n        let deserialized;\n        \n        if (method === 'eval') {\n            // 极度危险：使用eval反序列化\n            deserialized = eval('(' + serializedData + ')');\n        } else if (method === 'function') {\n            // 危险：使用Function构造函数\n            const func = new Function('return ' + serializedData);\n            deserialized = func();\n        } else if (method === 'json') {\n            // 相对安全但仍然有风险\n            deserialized = JSON.parse(serializedData);\n        }\n        \n        // 执行对象中的方法（如果存在）\n        if (deserialized && deserialized.execute) {\n            const result = deserialized.execute();\n            res.json({\n                success: true,\n                deserialized: deserialized,\n                executionResult: result,\n                method: method\n            });\n        } else {\n            res.json({\n                success: true,\n                deserialized: deserialized,\n                method: method\n            });\n        }\n    } catch (error) {\n        res.status(500).json({\n            error: error.message,\n            method: method\n        });\n    }\n});\n\n// 4. 不安全的Node.js序列化\nconst nodeSerialize = require('node-serialize');\n\napp.post('/deserialize-node', (req, res) => {\n    const serialized = req.body.serialized;\n    const useUnsafe = req.body.unsafe !== false;\n    \n    if (!serialized) {\n        res.status(400).send('缺少序列化数据');\n        return;\n    }\n    \n    try {\n        let deserialized;\n        \n        if (useUnsafe) {\n            // 危险：使用不安全的反序列化方法\n            deserialized = nodeSerialize.unserialize(serialized);\n        } else {\n            // 相对安全的方法\n            deserialized = JSON.parse(serialized);\n        }\n        \n        res.json({\n            success: true,\n            deserialized: deserialized,\n            type: typeof deserialized,\n            unsafe: useUnsafe\n        });\n    } catch (error) {\n        res.status(500).json({\n            error: error.message,\n            unsafe: useUnsafe\n        });\n    }\n});\n\n// 5. 自定义反序列化函数\napp.post('/custom-deserialize', (req, res) => {\n    const data = req.body.data;\n    const deserializer = req.body.deserializer;\n    \n    if (!data || !deserializer) {\n        res.status(400).send('缺少数据或反序列化器');\n        return;\n    }\n    \n    try {\n        // 危险：使用用户提供的反序列化函数\n        const deserializeFunc = new Function('data', deserializer);\n        const result = deserializeFunc(data);\n        \n        res.json({\n            success: true,\n            result: result,\n            deserializer: deserializer\n        });\n    } catch (error) {\n        res.status(500).json({\n            error: error.message,\n            deserializer: deserializer\n        });\n    }\n});\n\n// 6. YAML反序列化漏洞\nconst yaml = require('js-yaml');\n\napp.post('/deserialize-yaml', (req, res) => {\n    const yamlData = req.body.yaml;\n    const unsafeLoad = req.body.unsafe !== false;\n    \n    if (!yamlData) {\n        res.status(400).send('缺少YAML数据');\n        return;\n    }\n    \n    try {\n        let result;\n        \n        if (unsafeLoad) {\n            // 危险：使用不安全的YAML加载\n            result = yaml.load(yamlData);\n        } else {\n            // 相对安全的方法\n            result = yaml.safeLoad(yamlData);\n        }\n        \n        // 执行结果中的函数（如果存在）\n        if (result && typeof result === 'object' && result.run) {\n            const executionResult = result.run();\n            res.json({\n                success: true,\n                yaml: result,\n                executionResult: executionResult,\n                unsafe: unsafeLoad\n            });\n        } else {\n            res.json({\n                success: true,\n                yaml: result,\n                unsafe: unsafeLoad\n            });\n        }\n    } catch (error) {\n        res.status(500).json({\n            error: error.message,\n            unsafe: unsafeLoad\n        });\n    }\n});\n\n// 7. XML反序列化漏洞\nconst xml2js = require('xml2js');\n\napp.post('/deserialize-xml', (req, res) => {\n    const xmlData = req.body.xml;\n    const options = req.body.options || {};\n    \n    if (!xmlData) {\n        res.status(400).send('缺少XML数据');\n        return;\n    }\n    \n    const parser = new xml2js.Parser({\n        explicitArray: false,\n        ...options\n    });\n    \n    parser.parseString(xmlData, (err, result) => {\n        if (err) {\n            res.status(500).json({\n                error: err.message,\n                xml: xmlData\n            });\n            return;\n        }\n        \n        // 危险：处理XML中的实体\n        if (result && result.entity) {\n            // 可能导致XXE攻击\n            res.json({\n                success: true,\n                xml: result,\n                entityProcessed: true\n            });\n        } else {\n            res.json({\n                success: true,\n                xml: result\n            });\n        }\n    });\n});\n\n// 8. 使用构造函数的反序列化\napp.post('/constructor-deserialize', (req, res) => {\n    const constructorData = req.body.constructorData;\n    const constructorName = req.body.constructorName;\n    \n    if (!constructorData || !constructorName) {\n        res.status(400).send('缺少构造函数数据');\n        return;\n    }\n    \n    try {\n        // 危险：使用用户提供的构造函数名\n        const Constructor = global[constructorName] || eval(constructorName);\n        const instance = new Constructor(constructorData);\n        \n        res.json({\n            success: true,\n            instance: instance,\n            constructorName: constructorName,\n            type: typeof instance\n        });\n    } catch (error) {\n        res.status(500).json({\n            error: error.message,\n            constructorName: constructorName\n        });\n    }\n});\n\n// 9. 原型污染攻击\napp.post('/prototype-pollution', (req, res) => {\n    const target = req.body.target;\n    const property = req.body.property;\n    const value = req.body.value;\n    \n    if (!target || !property) {\n        res.status(400).send('缺少目标或属性参数');\n        return;\n    }\n    \n    try {\n        // 危险：可能导致原型污染\n        const obj = JSON.parse(target);\n        \n        // 设置属性可能导致原型污染\n        if (property.includes('__proto__') || property.includes('constructor')) {\n            // 故意允许原型污染\n            obj[property] = value;\n        } else {\n            obj[property] = value;\n        }\n        \n        res.json({\n            success: true,\n            modifiedObject: obj,\n            property: property,\n            value: value\n        });\n    } catch (error) {\n        res.status(500).json({\n            error: error.message\n        });\n    }\n});\n\n// 10. 远程代码执行载荷\napp.post('/rce-payload', (req, res) => {\n    const payload = req.body.payload;\n    const executionMethod = req.body.method || 'eval';\n    \n    if (!payload) {\n        res.status(400).send('缺少载荷数据');\n        return;\n    }\n    \n    try {\n        let result;\n        \n        switch (executionMethod) {\n            case 'eval':\n                result = eval(payload);\n                break;\n            case 'function':\n                const func = new Function('return ' + payload);\n                result = func();\n                break;\n            case 'exec':\n                const { execSync } = require('child_process');\n                result = execSync(payload, { encoding: 'utf8' });\n                break;\n            case 'vm':\n                const vm = require('vm');\n                const script = new vm.Script(payload);\n                result = script.runInThisContext();\n                break;\n            default:\n                throw new Error('未知的执行方法');\n        }\n        \n        res.json({\n            success: true,\n            result: result,\n            method: executionMethod\n        });\n    } catch (error) {\n        res.status(500).json({\n            error: error.message,\n            method: executionMethod\n        });\n    }\n});\n\n// 11. 不安全的pickle反序列化（Python对象）\napp.post('/pickle-deserialize', (req, res) => {\n    const pickleData = req.body.pickle;\n    const pythonScript = req.body.pythonScript;\n    \n    if (!pickleData) {\n        res.status(400).send('缺少pickle数据');\n        return;\n    }\n    \n    try {\n        // 危险：使用Python处理pickle数据\n        const script = `\nimport pickle\nimport base64\n\ndata = base64.b64decode('${pickleData}')\nobj = pickle.loads(data)\nprint(obj)\n`;\n        \n        const { execSync } = require('child_process');\n        const result = execSync(`python3 -c \"${script.replace(/\"/g, '\\\\\"')}\"`, { encoding: 'utf8' });\n        \n        res.json({\n            success: true,\n            result: result,\n            pickleProcessed: true\n        });\n    } catch (error) {\n        res.status(500).json({\n            error: error.message,\n            pickleData: pickleData\n        });\n    }\n});\n\n// 12. 使用模板引擎的反序列化\napp.post('/template-deserialize', (req, res) => {\n    const template = req.body.template;\n    const context = req.body.context || {};\n    \n    if (!template) {\n        res.status(400).send('缺少模板数据');\n        return;\n    }\n    \n    try {\n        // 危险：使用用户提供的模板\n        const templateFunction = new Function('context', `\n            with(context) {\n                return \\`${template}\\`;\n            }\n        `);\n        \n        const result = templateFunction(context);\n        \n        res.json({\n            success: true,\n            result: result,\n            template: template\n        });\n    } catch (error) {\n        res.status(500).json({\n            error: error.message,\n            template: template\n        });\n    }\n});\n\napp.listen(3000, () => {\n    console.log('不安全反序列化漏洞演示服务器运行在端口3000');\n});",
+    "usedDeprecatedRules": []
+  },
+  {
+    "filePath": "/Volumes/jiangzhi-ssd/code/personal/eslint-security-cli/test-case/js-security/weak-cryptography.js",
+    "messages": [
+      {
+        "ruleId": "sonarjs/x-powered-by",
+        "severity": 2,
+        "message": "This framework implicitly discloses version information by default. Make sure it is safe here.",
+        "line": 16,
+        "column": 7,
+        "nodeType": "Identifier",
+        "messageId": "headerDefault",
+        "endLine": 16,
+        "endColumn": 10
+      },
+      {
+        "ruleId": "sonarjs/encryption-secure-mode",
+        "severity": 2,
+        "message": "Use a secure mode and padding scheme.",
+        "line": 71,
+        "column": 42,
+        "nodeType": "Literal",
+        "messageId": "useSecureMode",
+        "endLine": 71,
+        "endColumn": 55
+      },
+      {
+        "ruleId": "sonarjs/encryption-secure-mode",
+        "severity": 2,
+        "message": "Use a secure mode and padding scheme.",
+        "line": 119,
+        "column": 42,
+        "nodeType": "Literal",
+        "messageId": "useSecureMode",
+        "endLine": 119,
+        "endColumn": 55
+      },
+      {
+        "ruleId": "sonarjs/hashing",
+        "severity": 2,
+        "message": "Make sure this weak hash algorithm is not used in a sensitive context here.",
+        "line": 165,
+        "column": 22,
+        "nodeType": "MemberExpression",
+        "endLine": 165,
+        "endColumn": 39
+      },
+      {
+        "ruleId": "sonarjs/hashing",
+        "severity": 2,
+        "message": "Make sure this weak hash algorithm is not used in a sensitive context here.",
+        "line": 197,
+        "column": 20,
+        "nodeType": "MemberExpression",
+        "endLine": 197,
+        "endColumn": 37
+      },
+      {
+        "ruleId": "sonarjs/hashing",
+        "severity": 2,
+        "message": "Make sure this weak hash algorithm is not used in a sensitive context here.",
+        "line": 203,
+        "column": 20,
+        "nodeType": "MemberExpression",
+        "endLine": 203,
+        "endColumn": 37
+      },
+      {
+        "ruleId": "sonarjs/pseudo-random",
+        "severity": 2,
+        "message": "Make sure that using this pseudorandom number generator is safe here.",
+        "line": 257,
+        "column": 40,
+        "nodeType": "CallExpression",
+        "messageId": "safeGenerator",
+        "endLine": 257,
+        "endColumn": 53
+      },
+      {
+        "ruleId": "sonarjs/encryption-secure-mode",
+        "severity": 2,
+        "message": "Use a secure mode and padding scheme.",
+        "line": 381,
+        "column": 46,
+        "nodeType": "Literal",
+        "messageId": "useSecureMode",
+        "endLine": 381,
+        "endColumn": 59
+      }
+    ],
+    "suppressedMessages": [],
+    "errorCount": 8,
+    "fatalErrorCount": 0,
+    "warningCount": 0,
+    "fixableErrorCount": 0,
+    "fixableWarningCount": 0,
+    "source": "/**\n * 弱加密算法漏洞示例\n * 相关规则：\n * - CWE-327: Use of a Broken or Risky Cryptographic Algorithm\n * - CWE-326: Inadequate Encryption Strength\n * - CWE-329: Not Using a Random IV with CBC Mode\n * - CWE-330: Use of Insufficiently Random Values\n * - OWASP Top 10:2017-A3-Sensitive Data Exposure\n * - OWASP Top 10:2021-A02-Cryptographic Failures\n * - PCI DSS V3.2.1-Requirement 3.5, 3.6, 4.1\n * - CWE Top 25:2023-CWE-327\n */\n\nconst express = require('express');\nconst crypto = require('crypto');\nconst app = express();\n\napp.use(express.json());\napp.use(express.urlencoded({ extended: true }));\n\n// 1. 使用弱加密算法 - DES\nconst WEAK_DES_KEY = '12345678'; // 8字节密钥，太弱\n\nfunction encryptWithDES(plaintext) {\n    const cipher = crypto.createCipher('des', WEAK_DES_KEY); // 使用弱DES算法\n    let encrypted = cipher.update(plaintext, 'utf8', 'hex');\n    encrypted += cipher.final('hex');\n    return encrypted;\n}\n\nfunction decryptWithDES(encrypted) {\n    const decipher = crypto.createDecipher('des', WEAK_DES_KEY);\n    let decrypted = decipher.update(encrypted, 'hex', 'utf8');\n    decrypted += decipher.final('utf8');\n    return decrypted;\n}\n\napp.post('/encrypt/des', (req, res) => {\n    const { plaintext, key } = req.body;\n    \n    if (!plaintext) {\n        res.status(400).send('缺少明文数据');\n        return;\n    }\n    \n    try {\n        const encryptionKey = key || WEAK_DES_KEY;\n        const encrypted = encryptWithDES(plaintext);\n        \n        res.json({\n            algorithm: 'DES',\n            key: encryptionKey, // 泄露加密密钥！\n            keyLength: encryptionKey.length * 8,\n            plaintext: plaintext,\n            encrypted: encrypted,\n            strength: 'weak',\n            warning: 'DES算法已被破解，不应在生产环境中使用'\n        });\n    } catch (error) {\n        res.status(500).json({\n            error: error.message,\n            algorithm: 'DES'\n        });\n    }\n});\n\n// 2. 使用ECB模式（不安全）\nconst ECB_KEY = 'this-is-a-16-byte-key'; // 128位密钥\n\nfunction encryptWithECB(plaintext) {\n    const cipher = crypto.createCipheriv('aes-128-ecb', ECB_KEY, null); // ECB模式不安全\n    let encrypted = cipher.update(plaintext, 'utf8', 'hex');\n    encrypted += cipher.final('hex');\n    return encrypted;\n}\n\nfunction decryptWithECB(encrypted) {\n    const decipher = crypto.createDecipheriv('aes-128-ecb', ECB_KEY, null);\n    let decrypted = decipher.update(encrypted, 'hex', 'utf8');\n    decrypted += decipher.final('utf8');\n    return decrypted;\n}\n\napp.post('/encrypt/ecb', (req, res) => {\n    const { plaintext } = req.body;\n    \n    if (!plaintext) {\n        res.status(400).send('缺少明文数据');\n        return;\n    }\n    \n    try {\n        const encrypted = encryptWithECB(plaintext);\n        \n        res.json({\n            algorithm: 'AES-128-ECB',\n            mode: 'ECB',\n            key: ECB_KEY, // 泄露密钥！\n            keyLength: 128,\n            iv: 'none', // ECB模式不使用IV\n            plaintext: plaintext,\n            encrypted: encrypted,\n            security: 'insecure',\n            warning: 'ECB模式不安全，相同的明文块会产生相同的密文块'\n        });\n    } catch (error) {\n        res.status(500).json({\n            error: error.message,\n            mode: 'ECB'\n        });\n    }\n});\n\n// 3. 使用固定的IV\nconst STATIC_IV = '1234567890123456'; // 固定的IV，不安全\nconst CBC_KEY = 'this-is-a-32-byte-key-for-aes256!'; // 256位密钥\n\nfunction encryptWithStaticIV(plaintext) {\n    const cipher = crypto.createCipheriv('aes-256-cbc', CBC_KEY, STATIC_IV);\n    let encrypted = cipher.update(plaintext, 'utf8', 'hex');\n    encrypted += cipher.final('hex');\n    return encrypted;\n}\n\napp.post('/encrypt/static-iv', (req, res) => {\n    const { plaintext } = req.body;\n    \n    if (!plaintext) {\n        res.status(400).send('缺少明文数据');\n        return;\n    }\n    \n    try {\n        const encrypted = encryptWithStaticIV(plaintext);\n        \n        res.json({\n            algorithm: 'AES-256-CBC',\n            key: CBC_KEY, // 泄露密钥！\n            keyLength: 256,\n            iv: STATIC_IV, // 泄露固定的IV！\n            ivLength: STATIC_IV.length * 8,\n            plaintext: plaintext,\n            encrypted: encrypted,\n            security: 'vulnerable',\n            warning: '使用固定的IV会降低加密的安全性'\n        });\n    } catch (error) {\n        res.status(500).json({\n            error: error.message,\n            ivType: 'static'\n        });\n    }\n});\n\n// 4. 使用弱哈希算法 - MD5\napp.post('/hash/md5', (req, res) => {\n    const { data, salt } = req.body;\n    \n    if (!data) {\n        res.status(400).send('缺少数据');\n        return;\n    }\n    \n    try {\n        const hash = crypto.createHash('md5'); // MD5已被破解\n        hash.update(data + (salt || ''));\n        const digest = hash.digest('hex');\n        \n        res.json({\n            algorithm: 'MD5',\n            data: data,\n            salt: salt || 'none',\n            hash: digest,\n            hashLength: digest.length,\n            security: 'broken',\n            collisions: 'vulnerable',\n            warning: 'MD5已被证明存在碰撞攻击，不应再使用'\n        });\n    } catch (error) {\n        res.status(500).json({\n            error: error.message,\n            algorithm: 'MD5'\n        });\n    }\n});\n\n// 5. 使用弱哈希算法 - SHA1\napp.post('/hash/sha1', (req, res) => {\n    const { data, iterations } = req.body;\n    \n    if (!data) {\n        res.status(400).send('缺少数据');\n        return;\n    }\n    \n    try {\n        let hash = crypto.createHash('sha1'); // SHA1已被破解\n        hash.update(data);\n        let result = hash.digest('hex');\n        \n        // 多次哈希（仍然不安全）\n        for (let i = 1; i < (iterations || 1); i++) {\n            hash = crypto.createHash('sha1');\n            hash.update(result);\n            result = hash.digest('hex');\n        }\n        \n        res.json({\n            algorithm: 'SHA1',\n            data: data,\n            iterations: iterations || 1,\n            hash: result,\n            hashLength: result.length,\n            security: 'weak',\n            collisions: 'theoretical',\n            warning: 'SHA1已被证明存在理论上的碰撞攻击'\n        });\n    } catch (error) {\n        res.status(500).json({\n            error: error.message,\n            algorithm: 'SHA1'\n        });\n    }\n});\n\n// 6. 可预测的随机数生成器\nfunction getPredictableRandom() {\n    // 使用时间作为种子，可预测\n    const seed = Date.now();\n    const random = (seed * 9301 + 49297) % 233280;\n    return random / 233280;\n}\n\napp.get('/random/predictable', (req, res) => {\n    const count = parseInt(req.query.count) || 10;\n    const numbers = [];\n    \n    for (let i = 0; i < count; i++) {\n        numbers.push(getPredictableRandom());\n    }\n    \n    res.json({\n        method: 'predictable_linear_congruential',\n        seed: 'current_timestamp',\n        numbers: numbers,\n        security: 'vulnerable',\n        warning: '使用可预测的随机数生成器会降低加密安全性'\n    });\n});\n\n// 7. 弱密码生成器\nfunction generateWeakPassword(length) {\n    const charset = 'abcdefghijklmnopqrstuvwxyz0123456789'; // 字符集太小\n    let password = '';\n    \n    for (let i = 0; i < length; i++) {\n        const randomIndex = Math.floor(Math.random() * charset.length);\n        password += charset[randomIndex];\n    }\n    \n    return password;\n}\n\napp.get('/password/generate-weak', (req, res) => {\n    const length = parseInt(req.query.length) || 8;\n    \n    if (length < 4) {\n        res.status(400).send('密码长度太短');\n        return;\n    }\n    \n    const password = generateWeakPassword(length);\n    \n    res.json({\n        password: password,\n        length: length,\n        charset: 'abcdefghijklmnopqrstuvwxyz0123456789',\n        charsetSize: 36,\n        entropy: length * Math.log2(36), // 计算熵\n        strength: 'weak',\n        warning: '字符集太小，容易受到暴力破解攻击'\n    });\n});\n\n// 8. 自定义弱加密算法\nfunction weakCustomEncrypt(text, key) {\n    let result = '';\n    for (let i = 0; i < text.length; i++) {\n        const charCode = text.charCodeAt(i);\n        const keyChar = key.charCodeAt(i % key.length);\n        result += String.fromCharCode(charCode ^ keyChar); // 简单的XOR加密\n    }\n    return Buffer.from(result).toString('base64');\n}\n\nfunction weakCustomDecrypt(encrypted, key) {\n    const decoded = Buffer.from(encrypted, 'base64').toString();\n    let result = '';\n    for (let i = 0; i < decoded.length; i++) {\n        const charCode = decoded.charCodeAt(i);\n        const keyChar = key.charCodeAt(i % key.length);\n        result += String.fromCharCode(charCode ^ keyChar);\n    }\n    return result;\n}\n\napp.post('/encrypt/custom-weak', (req, res) => {\n    const { plaintext, key } = req.body;\n    \n    if (!plaintext) {\n        res.status(400).send('缺少明文数据');\n        return;\n    }\n    \n    try {\n        const encryptionKey = key || 'secret';\n        const encrypted = weakCustomEncrypt(plaintext, encryptionKey);\n        const decrypted = weakCustomDecrypt(encrypted, encryptionKey);\n        \n        res.json({\n            algorithm: 'custom_xor',\n            key: encryptionKey, // 泄露密钥！\n            keyLength: encryptionKey.length * 8,\n            method: 'XOR + Base64',\n            plaintext: plaintext,\n            encrypted: encrypted,\n            decrypted: decrypted,\n            security: 'extremely_weak',\n            warning: '自定义XOR加密非常容易被破解'\n        });\n    } catch (error) {\n        res.status(500).json({\n            error: error.message,\n            algorithm: 'custom_weak'\n        });\n    }\n});\n\n// 9. 不使用盐值的哈希\napp.post('/hash/no-salt', (req, res) => {\n    const { password } = req.body;\n    \n    if (!password) {\n        res.status(400).send('缺少密码');\n        return;\n    }\n    \n    try {\n        // 不使用盐值\n        const hash = crypto.createHash('sha256').update(password).digest('hex');\n        \n        res.json({\n            algorithm: 'SHA256',\n            salt: 'none',\n            password: password, // 泄露原始密码！\n            hash: hash,\n            security: 'vulnerable_to_rainbow_tables',\n            warning: '不使用盐值容易受到彩虹表攻击'\n        });\n    } catch (error) {\n        res.status(500).json({\n            error: error.message,\n            salt: 'none'\n        });\n    }\n});\n\n// 10. 硬编码密钥\nconst HARDCODED_KEY = 'this-is-my-secret-encryption-key-32-bytes!'; // 硬编码密钥\nconst HARDCODED_IV = '1234567890123456'; // 硬编码IV\n\napp.post('/encrypt/hardcoded', (req, res) => {\n    const { plaintext } = req.body;\n    \n    if (!plaintext) {\n        res.status(400).send('缺少明文数据');\n        return;\n    }\n    \n    try {\n        const cipher = crypto.createCipheriv('aes-256-cbc', HARDCODED_KEY, HARDCODED_IV);\n        let encrypted = cipher.update(plaintext, 'utf8', 'hex');\n        encrypted += cipher.final('hex');\n        \n        res.json({\n            algorithm: 'AES-256-CBC',\n            key: HARDCODED_KEY, // 泄露硬编码密钥！\n            iv: HARDCODED_IV, // 泄露硬编码IV！\n            keySource: 'hardcoded',\n            plaintext: plaintext,\n            encrypted: encrypted,\n            security: 'vulnerable',\n            warning: '硬编码密钥容易被逆向工程获取'\n        });\n    } catch (error) {\n        res.status(500).json({\n            error: error.message,\n            keySource: 'hardcoded'\n        });\n    }\n});\n\n// 11. 不使用HTTPS的加密传输\napp.get('/crypto/transfer-insecure', (req, res) => {\n    const sensitiveData = {\n        creditCard: '4111-1111-1111-1111',\n        cvv: '123',\n        expiration: '12/25',\n        ssn: '123-45-6789',\n        apiKey: 'sk-1234567890abcdef'\n    };\n    \n    // 危险：通过HTTP传输敏感数据\n    res.json({\n        protocol: 'HTTP',\n        encryption: 'none',\n        data: sensitiveData,\n        warning: '敏感数据应该通过HTTPS传输',\n        security: 'vulnerable_to_man_in_the_middle'\n    });\n});\n\n// 12. 密钥管理不当\nconst KEY_STORAGE = {\n    encryptionKey: 'encryption-key-1234567890123456',\n    signingKey: 'signing-key-1234567890123456',\n    apiKey: 'api-key-1234567890abcdef',\n    databaseKey: 'database-key-1234567890abcdef'\n};\n\napp.get('/crypto/key-management', (req, res) => {\n    // 危险：泄露所有密钥\n    res.json({\n        keys: KEY_STORAGE,\n        storageMethod: 'plain_text_in_code',\n        rotationPolicy: 'never',\n        accessControl: 'none',\n        backup: 'plain_text_backup',\n        security: 'extremely_vulnerable',\n        warning: '密钥应该使用专门的密钥管理系统'\n    });\n});\n\napp.listen(3000, () => {\n    console.log('弱加密算法漏洞演示服务器运行在端口3000');\n});",
+    "usedDeprecatedRules": []
+  },
+  {
+    "filePath": "/Volumes/jiangzhi-ssd/code/personal/eslint-security-cli/test-case/js-security/sensitive-data-exposure.js",
+    "messages": [
+      {
+        "ruleId": "sonarjs/x-powered-by",
+        "severity": 2,
+        "message": "This framework implicitly discloses version information by default. Make sure it is safe here.",
+        "line": 20,
+        "column": 7,
+        "nodeType": "Identifier",
+        "messageId": "headerDefault",
+        "endLine": 20,
+        "endColumn": 10
+      },
+      {
+        "ruleId": "sonarjs/no-hardcoded-passwords",
+        "severity": 2,
+        "message": "Review this potentially hard-coded password.",
+        "line": 30,
+        "column": 15,
+        "nodeType": "Literal",
+        "messageId": "reviewPassword",
+        "endLine": 30,
+        "endColumn": 40
+      },
+      {
+        "ruleId": "sonarjs/no-hardcoded-passwords",
+        "severity": 2,
+        "message": "Review this potentially hard-coded password.",
+        "line": 83,
+        "column": 28,
+        "nodeType": "Literal",
+        "messageId": "reviewPassword",
+        "endLine": 83,
+        "endColumn": 90
+      },
+      {
+        "ruleId": "sonarjs/no-hardcoded-passwords",
+        "severity": 2,
+        "message": "Review this potentially hard-coded password.",
+        "line": 188,
+        "column": 35,
+        "nodeType": "Literal",
+        "messageId": "reviewPassword",
+        "endLine": 188,
+        "endColumn": 54
+      },
+      {
+        "ruleId": "sonarjs/no-hardcoded-passwords",
+        "severity": 2,
+        "message": "Review this potentially hard-coded password.",
+        "line": 374,
+        "column": 19,
+        "nodeType": "Literal",
+        "messageId": "reviewPassword",
+        "endLine": 374,
+        "endColumn": 40
+      },
+      {
+        "ruleId": "sonarjs/no-hardcoded-passwords",
+        "severity": 2,
+        "message": "Review this potentially hard-coded password.",
+        "line": 423,
+        "column": 27,
+        "nodeType": "Literal",
+        "messageId": "reviewPassword",
+        "endLine": 423,
+        "endColumn": 47
+      }
+    ],
+    "suppressedMessages": [],
+    "errorCount": 6,
+    "fatalErrorCount": 0,
+    "warningCount": 0,
+    "fixableErrorCount": 0,
+    "fixableWarningCount": 0,
+    "source": "/**\n * 敏感数据泄露漏洞示例\n * 相关规则：\n * - CWE-200: Information Exposure\n * - CWE-209: Information Exposure Through Error Messages\n * - CWE-213: Exposure of Sensitive Information Due to Incompatible Policies\n * - CWE-532: Information Exposure Through Log Files\n * - CWE-534: Information Exposure Through Debug Log Files\n * - OWASP Top 10:2017-A3-Sensitive Data Exposure\n * - OWASP Top 10:2021-A02-Cryptographic Failures\n * - PCI DSS V3.2.1-Requirement 3.4, 6.5.5\n * - CWE Top 25:2023-CWE-200\n */\n\nconst express = require('express');\nconst fs = require('fs');\nconst crypto = require('crypto');\nconst jwt = require('jsonwebtoken');\n\nconst app = express();\n\napp.use(express.json());\napp.use(express.urlencoded({ extended: true }));\n\n// 1. 数据库连接信息泄露\nconst databaseConfig = {\n    host: 'localhost',\n    port: 3306,\n    user: 'root',\n    password: 'SuperSecretPassword123!', // 明文密码\n    database: 'user_data',\n    ssl: false, // 未使用SSL\n    connectionLimit: 10\n};\n\napp.get('/api/config', (req, res) => {\n    // 危险：泄露完整的数据库配置信息\n    res.json({\n        database: databaseConfig,\n        server: {\n            port: 3000,\n            environment: 'production',\n            debug: true, // 在生产环境中启用调试\n            version: '1.0.0'\n        },\n        features: {\n            logging: true,\n            monitoring: true,\n            analytics: true\n        }\n    });\n});\n\n// 2. 详细的错误信息泄露\napp.get('/api/users/:id', (req, res) => {\n    const userId = req.params.id;\n\n    try {\n        // 模拟数据库查询\n        const query = `SELECT * FROM users WHERE id = ${userId}`;\n\n        // 模拟数据库错误\n        if (userId === '999') {\n            throw new Error(`Database query failed: ${query}. Connection timeout after 30000ms. Host: ${databaseConfig.host}:${databaseConfig.port}, User: ${databaseConfig.user}`);\n        }\n\n        // 模拟用户不存在\n        if (userId === '888') {\n            return res.status(404).json({\n                error: 'User not found',\n                query: query,\n                database: databaseConfig.database,\n                table: 'users',\n                searchedId: userId\n            });\n        }\n\n        // 模拟成功响应\n        res.json({\n            id: userId,\n            username: 'john_doe',\n            email: 'john@example.com',\n            password_hash: '$2b$10$EixZaYVK1fsbw1ZfbX3OXePaWxn96p36WQoeG6Lruj3vjPGga31lW', // 泄露密码哈希\n            api_key: 'sk-1234567890abcdef1234567890abcdef', // 泄露API密钥\n            created_at: '2023-01-01T00:00:00Z',\n            last_login: '2023-12-01T12:00:00Z'\n        });\n\n    } catch (error) {\n        // 危险：泄露详细的错误信息\n        res.status(500).json({\n            error: error.message,\n            stack: error.stack, // 泄露堆栈信息\n            query: query,\n            databaseConfig: databaseConfig,\n            serverInfo: {\n                nodeVersion: process.version,\n                platform: process.platform,\n                arch: process.arch,\n                uptime: process.uptime()\n            }\n        });\n    }\n});\n\n// 3. JWT密钥泄露\nconst JWT_SECRET = 'my-super-secret-jwt-key-that-should-be-hidden'; // 硬编码的JWT密钥\nconst JWT_PUBLIC_KEY = `-----BEGIN PUBLIC KEY-----\nMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAuGbXWiK3dQTyCbX5xdE4\nyCuYp0ySiTxoUbkv8wxm8fYK/5nnOmSmJAGWiMOH9QBfJJjnKLcm7pO6YkYTAqH2\neGG0nPHOhBp4bVj7RHf3JXBAe5AX6cXbCCM9Hx0xTG1vV7KtOY1QXo1QsNGSGrRT\n8CIBsj5B/2YxH+LxJ6J6lx6N9fqL8qE1EEkF+zL0+AOg6WQ/QYmR9nCJ7IzE8lZ1\ntWs6Xnz0YWo7hkJf+sEZ0q6M7/TfA1RU6Vz8+qz3GJK4BLhd7CQr0lZZlQH2kjU6\nI4JCf1JrUZmLGKQgqwR9L0Sg1p4vYn1FQeLxrjhGHwSJZBB8yL7K6A8k8FgQSgQI\nFQIDAQAB\n-----END PUBLIC KEY-----`;\n\napp.get('/api/auth/keys', (req, res) => {\n    // 危险：泄露JWT密钥和公钥\n    res.json({\n        jwtSecret: JWT_SECRET,\n        jwtPublicKey: JWT_PUBLIC_KEY,\n        jwtAlgorithm: 'HS256',\n        jwtExpiration: '24h',\n        refreshTokenSecret: 'another-secret-key-for-refresh-tokens'\n    });\n});\n\n// 4. 环境变量泄露\napp.get('/api/system/env', (req, res) => {\n    // 危险：泄露所有环境变量\n    res.json({\n        environment: process.env,\n        nodeEnv: process.env.NODE_ENV,\n        databaseUrl: process.env.DATABASE_URL,\n        apiKeys: {\n            stripe: process.env.STRIPE_SECRET_KEY,\n            sendgrid: process.env.SENDGRID_API_KEY,\n            aws: {\n                accessKeyId: process.env.AWS_ACCESS_KEY_ID,\n                secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,\n                region: process.env.AWS_REGION\n            }\n        },\n        secrets: process.env.SECRETS ? JSON.parse(process.env.SECRETS) : null\n    });\n});\n\n// 5. 日志文件中的敏感信息泄露\napp.post('/api/login', (req, res) => {\n    const { username, password } = req.body;\n\n    // 危险：在日志中记录明文密码\n    console.log(`[LOGIN ATTEMPT] Username: ${username}, Password: ${password}, IP: ${req.ip}, User-Agent: ${req.headers['user-agent']}`);\n\n    // 写入详细的日志文件\n    const logEntry = {\n        timestamp: new Date().toISOString(),\n        action: 'login_attempt',\n        username: username,\n        password: password, // 明文密码！\n        ip: req.ip,\n        userAgent: req.headers['user-agent'],\n        headers: req.headers, // 包含敏感头信息\n        body: req.body // 完整的请求体\n    };\n\n    fs.appendFileSync('./logs/auth.log', JSON.stringify(logEntry) + '\\n');\n\n    // 模拟认证\n    if (username === 'admin' && password === 'admin123') {\n        const token = jwt.sign({\n            userId: 1,\n            username: username,\n            role: 'admin',\n            permissions: ['read', 'write', 'delete', 'admin']\n        }, JWT_SECRET, { expiresIn: '24h' });\n\n        res.json({\n            success: true,\n            token: token,\n            user: {\n                id: 1,\n                username: username,\n                email: 'admin@example.com',\n                role: 'admin',\n                apiKey: 'admin-secret-key-12345', // 泄露管理员API密钥\n                databasePassword: 'admin-db-password' // 泄露数据库密码\n            }\n        });\n    } else {\n        res.status(401).json({\n            error: 'Invalid credentials',\n            username: username,\n            attemptedPassword: password, // 泄露尝试的密码\n            hint: 'Default credentials are admin/admin123'\n        });\n    }\n});\n\n// 6. 堆栈跟踪信息泄露\napp.get('/api/debug/error', (req, res) => {\n    // 故意制造错误来展示堆栈信息\n    const obj = null;\n\n    try {\n        obj.someProperty; // 这将抛出TypeError\n    } catch (error) {\n        // 危险：泄露完整的错误堆栈和系统信息\n        res.status(500).json({\n            error: {\n                name: error.name,\n                message: error.message,\n                stack: error.stack,\n                code: error.code || 'UNKNOWN_ERROR'\n            },\n            system: {\n                version: process.version,\n                platform: process.platform,\n                arch: process.arch,\n                memoryUsage: process.memoryUsage(),\n                uptime: process.uptime(),\n                cwd: process.cwd(),\n                execPath: process.execPath,\n                argv: process.argv\n            },\n            environment: {\n                NODE_ENV: process.env.NODE_ENV,\n                PORT: process.env.PORT,\n                DEBUG: process.env.DEBUG\n            },\n            request: {\n                method: req.method,\n                url: req.url,\n                headers: req.headers,\n                query: req.query,\n                body: req.body,\n                ip: req.ip,\n                ips: req.ips\n            }\n        });\n    }\n});\n\n// 7. 源代码泄露\napp.get('/api/debug/source', (req, res) => {\n    const filename = req.query.file || 'app.js';\n\n    // 危险：允许用户读取源代码文件\n    const filePath = `./${filename}`;\n\n    try {\n        const sourceCode = fs.readFileSync(filePath, 'utf8');\n\n        res.json({\n            filename: filename,\n            path: filePath,\n            size: sourceCode.length,\n            content: sourceCode, // 泄露源代码\n            lines: sourceCode.split('\\n').length,\n            lastModified: fs.statSync(filePath).mtime\n        });\n    } catch (error) {\n        res.status(500).json({\n            error: error.message,\n            attemptedFile: filePath,\n            availableFiles: fs.readdirSync('./'),\n            hint: 'Try app.js, package.json, or .env'\n        });\n    }\n});\n\n// 8. 配置文件泄露\napp.get('/api/config/files', (req, res) => {\n    const configFiles = [\n        'config.json',\n        'database.json',\n        'secrets.json',\n        'api-keys.json',\n        '.env',\n        '.env.local',\n        '.env.production'\n    ];\n\n    const configs = {};\n\n    configFiles.forEach(file => {\n        try {\n            if (fs.existsSync(file)) {\n                const content = fs.readFileSync(file, 'utf8');\n                configs[file] = {\n                    exists: true,\n                    content: file.includes('.env') ? content : JSON.parse(content),\n                    size: content.length,\n                    lastModified: fs.statSync(file).mtime\n                };\n            } else {\n                configs[file] = { exists: false };\n            }\n        } catch (error) {\n            configs[file] = {\n                exists: true,\n                error: error.message,\n                rawContent: fs.readFileSync(file, 'utf8')\n            };\n        }\n    });\n\n    res.json(configs);\n});\n\n// 9. 会话信息泄露\nconst sessions = new Map();\n\napp.get('/api/sessions', (req, res) => {\n    // 危险：泄露所有活跃的会话信息\n    const allSessions = Array.from(sessions.entries()).map(([sessionId, sessionData]) => ({\n        sessionId: sessionId,\n        userId: sessionData.userId,\n        username: sessionData.username,\n        email: sessionData.email,\n        role: sessionData.role,\n        permissions: sessionData.permissions,\n        ip: sessionData.ip,\n        userAgent: sessionData.userAgent,\n        createdAt: sessionData.createdAt,\n        lastActivity: sessionData.lastActivity,\n        token: sessionData.token, // 泄露会话令牌！\n        refreshToken: sessionData.refreshToken // 泄露刷新令牌！\n    }));\n\n    res.json({\n        totalSessions: allSessions.length,\n        sessions: allSessions,\n        sessionStore: {\n            type: 'In-Memory',\n            size: sessions.size,\n            keys: Array.from(sessions.keys())\n        }\n    });\n});\n\n// 10. 加密密钥泄露\nconst encryptionKey = 'my-encryption-key-1234567890123456'; // 硬编码加密密钥\nconst encryptionIV = 'my-iv-vector-123'; // 硬编码IV\n\napp.get('/api/crypto/keys', (req, res) => {\n    // 危险：泄露加密密钥\n    res.json({\n        encryptionKey: encryptionKey,\n        encryptionIV: encryptionIV,\n        algorithm: 'aes-256-cbc',\n        keySize: 256,\n        availableKeys: {\n            'payment-key': 'payment-encryption-key-2023',\n            'user-data-key': 'user-data-encryption-key',\n            'api-key-encryption': 'api-key-encryption-secret',\n            'backup-encryption': 'backup-encryption-key-secure'\n        },\n        keyGeneration: {\n            method: 'static',\n            lastRotated: 'never',\n            rotationPolicy: 'manual'\n        }\n    });\n});\n\n// 11. 用户数据泄露\nconst users = [\n    {\n        id: 1,\n        username: 'john_doe',\n        email: 'john@example.com',\n        password: 'hashed_password_123',\n        ssn: '123-45-6789', // 社会安全号码\n        creditCard: '4111-1111-1111-1111', // 信用卡号\n        cvv: '123', // CVV码\n        expiration: '12/25',\n        address: '123 Main St, Anytown, ST 12345',\n        phone: '+1-555-123-4567',\n        dateOfBirth: '1990-01-01',\n        motherMaidenName: 'Smith', // 母亲婚前姓名\n        firstPet: 'Fluffy', // 第一只宠物名字\n        securityQuestions: {\n            'firstSchool': 'Lincoln Elementary',\n            'favoriteTeacher': 'Mrs. Johnson',\n            'childhoodFriend': 'Tommy'\n        }\n    }\n];\n\napp.get('/api/users/all', (req, res) => {\n    // 危险：泄露所有用户的敏感信息\n    res.json({\n        totalUsers: users.length,\n        users: users,\n        sensitiveFields: ['ssn', 'creditCard', 'cvv', 'securityQuestions'],\n        dataRetention: 'forever',\n        encryptionStatus: 'none'\n    });\n});\n\n// 12. 网络配置泄露\napp.get('/api/network/config', (req, res) => {\n    res.json({\n        server: {\n            hostname: require('os').hostname(),\n            networkInterfaces: require('os').networkInterfaces(),\n            listeningPorts: [3000, 3306, 6379, 8080, 22, 21],\n            firewallRules: 'disabled',\n            sslConfiguration: 'default'\n        },\n        database: {\n            connectionString: 'mysql://root:SuperSecretPassword123!@localhost:3306/user_data',\n            maxConnections: 100,\n            timeout: 30000,\n            charset: 'utf8mb4'\n        },\n        cache: {\n            redis: {\n                host: 'localhost',\n                port: 6379,\n                password: 'redis-password-123',\n                db: 0\n            }\n        }\n    });\n});\n\napp.listen(3000, () => {\n    console.log('敏感数据泄露漏洞演示服务器运行在端口3000');\n});",
+    "usedDeprecatedRules": []
+  }
+]
