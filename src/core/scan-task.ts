@@ -14,6 +14,14 @@ export const createScanTask = async (cliOptions: CliOptions): Promise<{ status: 
   const eslint = createInstance(config)
   const results = await lintProject(eslint, cliOptions.project)
   await outputResults(results, cliOptions)
+  const statistics = results.reduce(
+    (acc, cur) => {
+      acc.errorCount += cur.errorCount
+      acc.warningCount += cur.warningCount
+      return acc
+    },
+    { errorCount: 0, warningCount: 0 }
+  )
   return {
     status: 'success'
   }

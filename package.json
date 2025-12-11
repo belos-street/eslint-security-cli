@@ -10,7 +10,7 @@
   "scripts": {
     "dev": "bun run src/main.ts",
     "build": "bun build src/main.ts --outdir dist --target bun",
-    "build:binary": "bun build src/main.ts --outfile bin/eslint-security --target bun --compile",
+    "build:binary": "bun build src/main.ts --outfile bin/eslint-security-cli --target bun --compile",
     "build:all": "bun run build && bun run build:binary",
     "test": "bun test",
     "lint": "eslint src/**/*.ts",
@@ -30,7 +30,6 @@
     "vue",
     "react"
   ],
-  "author": "Your Name",
   "license": "MIT",
   "engines": {
     "bun": ">=1.0.0"
@@ -46,6 +45,7 @@
     "eslint-plugin-sonarjs": "^3.0.5",
     "figlet": "^1.9.4",
     "glob": "^11.0.1",
+    "jiti": "^2.6.1",
     "vue-eslint-parser": "^10.2.0"
   },
   "devDependencies": {

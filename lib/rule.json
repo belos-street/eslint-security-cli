@@ -1,0 +1,5 @@
+{
+    "no-console": "error",
+    "no-unused-vars": "warn",
+    "sonarjs/x-powered-by": "error"
+}

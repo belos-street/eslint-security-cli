@@ -1,1 +1,0 @@
-https://eslint.nodejs.cn/docs/latest/use/command-line-interface

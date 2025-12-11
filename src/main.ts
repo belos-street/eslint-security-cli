@@ -1,11 +1,12 @@
 #!/usr/bin/env bun
 
-import { createCommand, displayArguments, validateArguments, printFiglet } from './cli'
+import { createCommand, displayArguments, validateArguments, createSimpleBanner } from './cli'
+import { CONFIG_DEFAULT } from './config'
 import { createScanTask } from './core'
 
-const bootstrap = () => {
-  // 1. 打印figlet
-  printFiglet()
+const bootstrap = async () => {
+  // 1.打印name
+  console.log(createSimpleBanner(CONFIG_DEFAULT.name))
 
   /**
    * 2.初始化命令行
@@ -24,9 +25,7 @@ const bootstrap = () => {
   console.log('\n🚀 开始执行ESLint安全扫描...')
   createScanTask(options)
     .then((res) => {
-      if (res.status === 'success') {
-        console.log('✅ 扫描任务完成！')
-      }
+      console.log('✅ 扫描任务完成！')
     })
     .catch((err) => {
       console.error('❌ 扫描任务执行失败:', err)
