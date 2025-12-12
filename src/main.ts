@@ -25,7 +25,9 @@ const bootstrap = async () => {
   console.log('\n🚀 开始执行ESLint安全扫描...')
   createScanTask(options)
     .then((res) => {
+      const { stats } = res
       console.log('✅ 扫描任务完成！')
+      console.log(`🔍 发现 ${stats.errorCount} 个错误和 ${stats.warningCount} 个警告`)
     })
     .catch((err) => {
       console.error('❌ 扫描任务执行失败:', err)
